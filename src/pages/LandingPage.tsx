@@ -1,4 +1,6 @@
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { ScrollReveal } from '../components/ScrollReveal'; // Importe o componente
 import {
   CheckCircle2,
   LayoutDashboard,
@@ -82,12 +84,12 @@ export function LandingPage() {
         </div>
       </nav>
 
-      {/* Hero Section com Vídeo Background */}
+      {/* Hero Section com Vídeo Background + Framer Motion */}
       <section
         id="hero"
         className="relative pt-32 pb-24 min-h-[90vh] flex items-center justify-center overflow-hidden"
       >
-        {/* Vídeo Background - Com Overlay */}
+        {/* Vídeo Background (Mantivemos igual) */}
         <div className="absolute top-0 left-0 w-full h-full z-0">
           <video
             autoPlay
@@ -96,117 +98,141 @@ export function LandingPage() {
             playsInline
             className="absolute top-1/2 left-1/2 min-w-full min-h-full w-auto h-auto -translate-x-1/2 -translate-y-1/2 object-cover"
           >
-            {/* O React busca arquivos da pasta public direto na raiz "/" */}
             <source src="/hero-video.mp4" type="video/mp4" />
           </video>
-          {/* Overlay Escuro (Gradiente suave para leitura) */}
           <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-black/80 via-black/50 to-black/80"></div>
         </div>
 
-        {/* Conteúdo (Z-index maior que o vídeo) */}
+        {/* Conteúdo Animado com Framer Motion */}
         <div className="relative z-10 px-4 mx-auto max-w-7xl text-center">
-          <span className="bg-white/10 backdrop-blur-md text-gold-300 text-xs font-bold px-4 py-1.5 rounded-full mb-8 inline-block border border-gold-500/30 uppercase tracking-widest shadow-lg">
-            ✨ Exclusivo para Cerimonialistas
-          </span>
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, ease: 'easeOut' }}
+          >
+            <span className="bg-white/10 backdrop-blur-md text-gold-300 text-xs font-bold px-4 py-1.5 rounded-full mb-8 inline-block border border-gold-500/30 uppercase tracking-widest shadow-lg hover:bg-white/20 transition-colors cursor-default">
+              ✨ Exclusivo para Cerimonialistas
+            </span>
+          </motion.div>
 
-          <h1 className="mb-6 text-5xl font-extrabold tracking-tight leading-tight text-white md:text-6xl lg:text-7xl drop-shadow-2xl">
+          <motion.h1
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.2, ease: 'easeOut' }}
+            className="mb-6 text-5xl font-extrabold tracking-tight leading-tight text-white md:text-6xl lg:text-7xl drop-shadow-2xl"
+          >
             A excelência que seus <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-gold-200 via-gold-400 to-gold-200 animate-pulse">
               eventos merecem
             </span>
-          </h1>
+          </motion.h1>
 
-          <p className="mb-12 text-lg font-light text-gray-200 lg:text-xl sm:px-16 lg:px-48 leading-relaxed drop-shadow-md max-w-4xl mx-auto">
+          <motion.p
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.4, ease: 'easeOut' }}
+            className="mb-12 text-lg font-light text-gray-200 lg:text-xl sm:px-16 lg:px-48 leading-relaxed drop-shadow-md max-w-4xl mx-auto"
+          >
             Eleve o nível da sua assessoria. Gestão impecável, checklists
             precisos e controle financeiro, tudo em uma interface sofisticada.
-          </p>
+          </motion.p>
 
-          <div className="flex flex-col space-y-4 sm:flex-row sm:justify-center sm:space-y-0 sm:space-x-6">
-            <Link
-              to="/login"
-              className="inline-flex justify-center items-center py-4 px-8 text-base font-bold text-center text-black rounded-xl bg-gold-400 hover:bg-gold-300 focus:ring-4 focus:ring-gold-300 transition-all shadow-xl hover:shadow-gold-500/50 hover:-translate-y-1 scale-100 hover:scale-105 duration-300"
-            >
-              Começar Agora
-              <ArrowRight className="ml-2 -mr-1 w-5 h-5" />
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.6, ease: 'easeOut' }}
+            className="flex flex-col space-y-4 sm:flex-row sm:justify-center sm:space-y-0 sm:space-x-6"
+          >
+            <Link to="/login">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="group inline-flex justify-center items-center py-4 px-8 text-base font-bold text-center text-black rounded-xl bg-gold-400 hover:bg-gold-300 focus:ring-4 focus:ring-gold-300 transition-colors shadow-[0_0_20px_rgba(250,204,21,0.3)] hover:shadow-[0_0_30px_rgba(250,204,21,0.5)] w-full sm:w-auto"
+              >
+                Começar Agora
+                <ArrowRight className="ml-2 -mr-1 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </motion.button>
             </Link>
-            <a
+
+            <motion.a
               href="#features"
-              className="inline-flex justify-center items-center py-4 px-8 text-base font-medium text-center text-white rounded-xl border border-white/30 hover:bg-white/10 backdrop-blur-sm focus:ring-4 focus:ring-gray-100 transition-all hover:-translate-y-1"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="inline-flex justify-center items-center py-4 px-8 text-base font-medium text-center text-white rounded-xl border border-white/30 hover:bg-white/10 backdrop-blur-sm focus:ring-4 focus:ring-gray-100 transition-colors w-full sm:w-auto"
             >
               Conhecer Detalhes
-            </a>
-          </div>
+            </motion.a>
+          </motion.div>
         </div>
       </section>
 
-      {/* Features Grid */}
-      <section id="features" className="py-24 bg-white">
-        <div className="py-8 px-4 mx-auto max-w-7xl sm:py-16 lg:px-6">
-          <div className="max-w-screen-md mb-12 lg:mb-16">
-            <h2 className="mb-4 text-4xl tracking-tight font-extrabold text-gray-900">
-              Sofisticação em cada detalhe
-            </h2>
-            <p className="text-gray-500 sm:text-xl font-light">
-              Ferramentas poderosas desenhadas para quem não aceita menos que a
-              perfeição.
-            </p>
-          </div>
-          <div className="space-y-8 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-12 md:space-y-0">
+      {/* Seção Features / Sofisticação */}
+      <section
+        id="features"
+        className="py-24 bg-white relative overflow-hidden"
+      >
+        <div className="container mx-auto px-4 relative z-10">
+          <ScrollReveal width="100%">
+            <div className="text-center mb-16 max-w-3xl mx-auto">
+              <span className="text-gold-500 font-semibold tracking-wider uppercase text-sm">
+                Por que escolher o PlanejarPro?
+              </span>
+              <h2 className="text-4xl font-playfair font-bold text-gray-900 mt-2 mb-4">
+                Sofisticação em cada detalhe
+              </h2>
+              <div className="w-24 h-1 bg-gold-400 mx-auto rounded-full"></div>
+            </div>
+          </ScrollReveal>
+
+          <div className="grid md:grid-cols-3 gap-8">
             {/* Card 1 */}
-            <div className="group p-8 bg-white rounded-2xl border border-gray-100 hover:border-gold-200 hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
-              <div className="flex justify-center items-center mb-6 w-14 h-14 rounded-xl bg-gray-50 text-gray-900 group-hover:bg-gold-500 group-hover:text-white transition-colors">
-                <LayoutDashboard className="w-7 h-7" />
+            <ScrollReveal delay={0.1}>
+              <div className="bg-gray-50 p-8 rounded-2xl border border-gray-100 hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group">
+                <div className="w-14 h-14 bg-gold-100 rounded-full flex items-center justify-center mb-6 group-hover:bg-gold-400 transition-colors">
+                  <span className="text-2xl">📋</span>{' '}
+                  {/* Troque por ícone Lucide se tiver */}
+                </div>
+                <h3 className="text-xl font-bold mb-3 text-gray-900">
+                  Gestão Completa
+                </h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Controle fornecedores, orçamentos e cronogramas em um único
+                  lugar, sem planilhas confusas.
+                </p>
               </div>
-              <h3 className="mb-3 text-xl font-bold text-gray-900">
-                Dashboard Executivo
-              </h3>
-              <p className="text-gray-500 font-light leading-relaxed">
-                Tenha uma visão panorâmica e elegante de todos os seus projetos
-                em andamento.
-              </p>
-            </div>
+            </ScrollReveal>
 
-            {/* Card 2 */}
-            <div className="group p-8 bg-white rounded-2xl border border-gray-100 hover:border-gold-200 hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
-              <div className="flex justify-center items-center mb-6 w-14 h-14 rounded-xl bg-gray-50 text-gray-900 group-hover:bg-gold-500 group-hover:text-white transition-colors">
-                <CheckCircle2 className="w-7 h-7" />
+            {/* Card 2 - Com um pouco mais de delay */}
+            <ScrollReveal delay={0.3}>
+              <div className="bg-gray-50 p-8 rounded-2xl border border-gray-100 hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group">
+                <div className="w-14 h-14 bg-gold-100 rounded-full flex items-center justify-center mb-6 group-hover:bg-gold-400 transition-colors">
+                  <span className="text-2xl">💰</span>
+                </div>
+                <h3 className="text-xl font-bold mb-3 text-gray-900">
+                  Financeiro Preciso
+                </h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Acompanhe pagamentos, vencimentos e fluxo de caixa de cada
+                  evento com clareza absoluta.
+                </p>
               </div>
-              <h3 className="mb-3 text-xl font-bold text-gray-900">
-                Checklists Premium
-              </h3>
-              <p className="text-gray-500 font-light leading-relaxed">
-                Cronogramas detalhados para garantir que nenhum minuto do grande
-                dia seja esquecido.
-              </p>
-            </div>
+            </ScrollReveal>
 
-            {/* Card 3 */}
-            <div className="group p-8 bg-white rounded-2xl border border-gray-100 hover:border-gold-200 hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
-              <div className="flex justify-center items-center mb-6 w-14 h-14 rounded-xl bg-gray-50 text-gray-900 group-hover:bg-gold-500 group-hover:text-white transition-colors">
-                <DollarSign className="w-7 h-7" />
+            {/* Card 3 - Com mais delay ainda */}
+            <ScrollReveal delay={0.5}>
+              <div className="bg-gray-50 p-8 rounded-2xl border border-gray-100 hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group">
+                <div className="w-14 h-14 bg-gold-100 rounded-full flex items-center justify-center mb-6 group-hover:bg-gold-400 transition-colors">
+                  <span className="text-2xl">📱</span>
+                </div>
+                <h3 className="text-xl font-bold mb-3 text-gray-900">
+                  Acesso Mobile
+                </h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Tenha todas as informações na palma da mão durante os eventos.
+                  Nada de pastas pesadas.
+                </p>
               </div>
-              <h3 className="mb-3 text-xl font-bold text-gray-900">
-                Gestão Financeira
-              </h3>
-              <p className="text-gray-500 font-light leading-relaxed">
-                Controle orçamentos e fluxo de caixa com a precisão que seu
-                negócio exige.
-              </p>
-            </div>
-
-            {/* Card 4 */}
-            <div className="group p-8 bg-white rounded-2xl border border-gray-100 hover:border-gold-200 hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
-              <div className="flex justify-center items-center mb-6 w-14 h-14 rounded-xl bg-gray-50 text-gray-900 group-hover:bg-gold-500 group-hover:text-white transition-colors">
-                <Calendar className="w-7 h-7" />
-              </div>
-              <h3 className="mb-3 text-xl font-bold text-gray-900">
-                Agenda Exclusiva
-              </h3>
-              <p className="text-gray-500 font-light leading-relaxed">
-                Organize visitas, degustações e reuniões em um calendário
-                integrado e intuitivo.
-              </p>
-            </div>
+            </ScrollReveal>
           </div>
         </div>
       </section>

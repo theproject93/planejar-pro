@@ -13,18 +13,20 @@ export function LandingPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-white font-sans text-gray-900">
+    <div className="min-h-screen bg-white font-sans text-gray-900 selection:bg-yellow-200">
       {/* Navbar com Glassmorphism */}
-      <nav className="fixed w-full z-50 top-0 start-0 border-b border-gray-200 bg-white/80 backdrop-blur-md">
+      <nav className="fixed w-full z-50 top-0 start-0 border-b border-gray-100 bg-white/90 backdrop-blur-md">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between p-4">
           <Link
             to="/"
-            className="flex items-center space-x-2 rtl:space-x-reverse"
+            className="flex items-center space-x-3 rtl:space-x-reverse"
           >
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xl">P</span>
+            <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center shadow-lg">
+              <span className="text-yellow-500 font-bold text-2xl font-serif">
+                P
+              </span>
             </div>
-            <span className="self-center text-xl font-bold whitespace-nowrap text-gray-900">
+            <span className="self-center text-xl font-bold whitespace-nowrap text-gray-900 tracking-tight">
               Planejar Pro
             </span>
           </Link>
@@ -33,7 +35,7 @@ export function LandingPage() {
             <Link to="/login">
               <button
                 type="button"
-                className="text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-4 focus:outline-none focus:ring-indigo-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center transition-all shadow-lg hover:shadow-indigo-500/30"
+                className="text-white bg-black hover:bg-gray-800 focus:ring-4 focus:outline-none focus:ring-gray-300 font-medium rounded-lg text-sm px-6 py-2.5 text-center transition-all shadow-md hover:shadow-xl hover:-translate-y-0.5 border border-transparent hover:border-yellow-500/50"
               >
                 Acessar Plataforma
               </button>
@@ -53,7 +55,7 @@ export function LandingPage() {
               <li>
                 <a
                   href="#hero"
-                  className="block py-2 px-3 text-indigo-600 md:p-0"
+                  className="block py-2 px-3 text-yellow-600 md:p-0 font-semibold"
                   aria-current="page"
                 >
                   Início
@@ -62,7 +64,7 @@ export function LandingPage() {
               <li>
                 <a
                   href="#features"
-                  className="block py-2 px-3 text-gray-900 hover:text-indigo-600 md:p-0 transition-colors"
+                  className="block py-2 px-3 text-gray-900 hover:text-yellow-600 md:p-0 transition-colors"
                 >
                   Recursos
                 </a>
@@ -70,7 +72,7 @@ export function LandingPage() {
               <li>
                 <a
                   href="#sobre"
-                  className="block py-2 px-3 text-gray-900 hover:text-indigo-600 md:p-0 transition-colors"
+                  className="block py-2 px-3 text-gray-900 hover:text-yellow-600 md:p-0 transition-colors"
                 >
                   Sobre
                 </a>
@@ -83,35 +85,35 @@ export function LandingPage() {
       {/* Hero Section */}
       <section
         id="hero"
-        className="pt-32 pb-20 bg-gradient-to-b from-indigo-50 to-white"
+        className="pt-32 pb-24 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-yellow-50 via-white to-white"
       >
         <div className="px-4 mx-auto max-w-7xl text-center">
-          <span className="bg-indigo-100 text-indigo-800 text-xs font-medium px-3 py-1 rounded-full mb-6 inline-block border border-indigo-200">
-            🚀 A ferramenta definitiva para cerimonialistas
+          <span className="bg-yellow-100 text-yellow-800 text-xs font-bold px-3 py-1 rounded-full mb-6 inline-block border border-yellow-200 uppercase tracking-wide">
+            ✨ Exclusivo para Cerimonialistas
           </span>
-          <h1 className="mb-6 text-4xl font-extrabold tracking-tight leading-none text-gray-900 md:text-6xl lg:text-7xl">
-            Organize eventos com <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">
-              precisão e tecnologia
+          <h1 className="mb-6 text-5xl font-extrabold tracking-tight leading-tight text-gray-900 md:text-6xl lg:text-7xl">
+            A excelência que seus <br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-500 via-yellow-600 to-yellow-700">
+              eventos merecem
             </span>
           </h1>
-          <p className="mb-8 text-lg font-normal text-gray-500 lg:text-xl sm:px-16 lg:px-48">
-            Diga adeus às planilhas bagunçadas. Tenha controle total de tarefas,
-            fornecedores e orçamentos em um único lugar.
+          <p className="mb-10 text-lg font-light text-gray-600 lg:text-xl sm:px-16 lg:px-48 leading-relaxed">
+            Eleve o nível da sua assessoria. Gestão impecável, checklists
+            precisos e controle financeiro, tudo em uma interface sofisticada.
           </p>
           <div className="flex flex-col space-y-4 sm:flex-row sm:justify-center sm:space-y-0 sm:space-x-4">
             <Link
               to="/login"
-              className="inline-flex justify-center items-center py-4 px-8 text-base font-medium text-center text-white rounded-xl bg-indigo-600 hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-300 transition-all shadow-xl hover:shadow-indigo-500/40 hover:-translate-y-1"
+              className="inline-flex justify-center items-center py-4 px-8 text-base font-bold text-center text-white rounded-xl bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 focus:ring-4 focus:ring-yellow-300 transition-all shadow-xl hover:shadow-yellow-500/40 hover:-translate-y-1"
             >
-              Começar Grátis
+              Começar Agora
               <ArrowRight className="ml-2 -mr-1 w-5 h-5" />
             </Link>
             <a
               href="#features"
-              className="inline-flex justify-center items-center py-4 px-8 text-base font-medium text-center text-gray-900 rounded-xl border border-gray-300 hover:bg-gray-100 focus:ring-4 focus:ring-gray-100 transition-all"
+              className="inline-flex justify-center items-center py-4 px-8 text-base font-medium text-center text-gray-900 rounded-xl border border-gray-200 hover:bg-gray-50 focus:ring-4 focus:ring-gray-100 transition-all"
             >
-              Ver Recursos
+              Conhecer Detalhes
             </a>
           </div>
         </div>
@@ -120,62 +122,69 @@ export function LandingPage() {
       {/* Features Grid */}
       <section id="features" className="py-24 bg-white">
         <div className="py-8 px-4 mx-auto max-w-7xl sm:py-16 lg:px-6">
-          <div className="max-w-screen-md mb-8 lg:mb-16">
+          <div className="max-w-screen-md mb-12 lg:mb-16">
             <h2 className="mb-4 text-4xl tracking-tight font-extrabold text-gray-900">
-              Tudo o que você precisa para entregar o evento perfeito
+              Sofisticação em cada detalhe
             </h2>
-            <p className="text-gray-500 sm:text-xl">
-              Desenvolvido pensando na rotina real de quem organiza sonhos.
+            <p className="text-gray-500 sm:text-xl font-light">
+              Ferramentas poderosas desenhadas para quem não aceita menos que a
+              perfeição.
             </p>
           </div>
           <div className="space-y-8 md:grid md:grid-cols-2 lg:grid-cols-3 md:gap-12 md:space-y-0">
             {/* Card 1 */}
-            <div className="p-8 bg-gray-50 rounded-2xl border border-gray-100 hover:shadow-lg transition-shadow">
-              <div className="flex justify-center items-center mb-4 w-12 h-12 rounded-lg bg-indigo-100 text-indigo-600">
-                <LayoutDashboard className="w-6 h-6" />
+            <div className="group p-8 bg-white rounded-2xl border border-gray-100 hover:border-yellow-200 hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+              <div className="flex justify-center items-center mb-6 w-14 h-14 rounded-xl bg-gray-50 text-gray-900 group-hover:bg-yellow-500 group-hover:text-white transition-colors">
+                <LayoutDashboard className="w-7 h-7" />
               </div>
-              <h3 className="mb-2 text-xl font-bold">Dashboard Intuitivo</h3>
-              <p className="text-gray-500">
-                Visão geral de todos os seus eventos ativos, próximos prazos e
-                pendências críticas.
+              <h3 className="mb-3 text-xl font-bold text-gray-900">
+                Dashboard Executivo
+              </h3>
+              <p className="text-gray-500 font-light leading-relaxed">
+                Tenha uma visão panorâmica e elegante de todos os seus projetos
+                em andamento.
               </p>
             </div>
 
             {/* Card 2 */}
-            <div className="p-8 bg-gray-50 rounded-2xl border border-gray-100 hover:shadow-lg transition-shadow">
-              <div className="flex justify-center items-center mb-4 w-12 h-12 rounded-lg bg-purple-100 text-purple-600">
-                <CheckCircle2 className="w-6 h-6" />
+            <div className="group p-8 bg-white rounded-2xl border border-gray-100 hover:border-yellow-200 hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+              <div className="flex justify-center items-center mb-6 w-14 h-14 rounded-xl bg-gray-50 text-gray-900 group-hover:bg-yellow-500 group-hover:text-white transition-colors">
+                <CheckCircle2 className="w-7 h-7" />
               </div>
-              <h3 className="mb-2 text-xl font-bold">
-                Checklists Inteligentes
+              <h3 className="mb-3 text-xl font-bold text-gray-900">
+                Checklists Premium
               </h3>
-              <p className="text-gray-500">
-                Modelos prontos de tarefas para Casamentos, 15 Anos e
-                Corporativos. Nunca esqueça um detalhe.
+              <p className="text-gray-500 font-light leading-relaxed">
+                Cronogramas detalhados para garantir que nenhum minuto do grande
+                dia seja esquecido.
               </p>
             </div>
 
             {/* Card 3 */}
-            <div className="p-8 bg-gray-50 rounded-2xl border border-gray-100 hover:shadow-lg transition-shadow">
-              <div className="flex justify-center items-center mb-4 w-12 h-12 rounded-lg bg-green-100 text-green-600">
-                <DollarSign className="w-6 h-6" />
+            <div className="group p-8 bg-white rounded-2xl border border-gray-100 hover:border-yellow-200 hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+              <div className="flex justify-center items-center mb-6 w-14 h-14 rounded-xl bg-gray-50 text-gray-900 group-hover:bg-yellow-500 group-hover:text-white transition-colors">
+                <DollarSign className="w-7 h-7" />
               </div>
-              <h3 className="mb-2 text-xl font-bold">Controle Financeiro</h3>
-              <p className="text-gray-500">
-                Acompanhe orçamentos, pagamentos realizados e pendentes de cada
-                cliente.
+              <h3 className="mb-3 text-xl font-bold text-gray-900">
+                Gestão Financeira
+              </h3>
+              <p className="text-gray-500 font-light leading-relaxed">
+                Controle orçamentos e fluxo de caixa com a precisão que seu
+                negócio exige.
               </p>
             </div>
 
             {/* Card 4 */}
-            <div className="p-8 bg-gray-50 rounded-2xl border border-gray-100 hover:shadow-lg transition-shadow">
-              <div className="flex justify-center items-center mb-4 w-12 h-12 rounded-lg bg-pink-100 text-pink-600">
-                <Calendar className="w-6 h-6" />
+            <div className="group p-8 bg-white rounded-2xl border border-gray-100 hover:border-yellow-200 hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+              <div className="flex justify-center items-center mb-6 w-14 h-14 rounded-xl bg-gray-50 text-gray-900 group-hover:bg-yellow-500 group-hover:text-white transition-colors">
+                <Calendar className="w-7 h-7" />
               </div>
-              <h3 className="mb-2 text-xl font-bold">Agenda Integrada</h3>
-              <p className="text-gray-500">
-                Sincronize visitas técnicas, reuniões e datas de eventos em um
-                só lugar.
+              <h3 className="mb-3 text-xl font-bold text-gray-900">
+                Agenda Exclusiva
+              </h3>
+              <p className="text-gray-500 font-light leading-relaxed">
+                Organize visitas, degustações e reuniões em um calendário
+                integrado e intuitivo.
               </p>
             </div>
           </div>
@@ -183,18 +192,18 @@ export function LandingPage() {
       </section>
 
       {/* Footer Simples */}
-      <footer className="p-4 bg-white md:p-8 lg:p-10 border-t border-gray-200">
+      <footer className="p-8 bg-black text-white border-t border-gray-800">
         <div className="mx-auto max-w-screen-xl text-center">
           <Link
             to="/"
-            className="flex justify-center items-center text-2xl font-semibold text-gray-900 mb-4"
+            className="flex justify-center items-center text-2xl font-serif font-bold text-yellow-500 mb-4"
           >
             Planejar Pro
           </Link>
-          <p className="my-6 text-gray-500">
-            Feito com ❤️ para facilitar a vida de quem organiza eventos.
+          <p className="my-6 text-gray-400 font-light">
+            Elevando o padrão da assessoria de eventos no Brasil.
           </p>
-          <span className="text-sm text-gray-500 sm:text-center">
+          <span className="text-sm text-gray-600 sm:text-center">
             © 2026 Planejar Pro. Todos os direitos reservados.
           </span>
         </div>

@@ -4,6 +4,8 @@ import { LoginPage } from './pages/LoginPage';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DashboardLayout } from './components/DashboardLayout';
 import { ProfilePage } from './pages/ProfilePage';
+import { EventsPage } from './pages/EventsPage';
+import { EventDetailsPage } from './pages/EventDetailsPage';
 import { type ReactNode } from 'react';
 
 // Componente para proteger rotas
@@ -20,13 +22,10 @@ function DashboardHome() {
         Visão Geral
       </h1>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Card 1 */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <h3 className="text-gray-500 text-sm font-medium">Eventos Ativos</h3>
           <p className="text-3xl font-bold text-gray-900 mt-2">12</p>
         </div>
-
-        {/* Card 2 */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <h3 className="text-gray-500 text-sm font-medium">
             Próximo Casamento
@@ -34,8 +33,6 @@ function DashboardHome() {
           <p className="text-lg font-bold text-gray-900 mt-2">Carla & João</p>
           <p className="text-sm text-gold-500 font-semibold">Em 5 dias</p>
         </div>
-
-        {/* Card 3 */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <h3 className="text-gray-500 text-sm font-medium">
             Faturamento (Mês)
@@ -64,20 +61,12 @@ function App() {
               </PrivateRoute>
             }
           >
-            {/* O que renderiza em /dashboard */}
             <Route index element={<DashboardHome />} />
-
-            {/* Sub-rotas */}
-            <Route
-              path="eventos"
-              element={
-                <div className="p-8">
-                  <h1 className="text-2xl font-bold text-gray-400">
-                    Página de Eventos (Em breve)
-                  </h1>
-                </div>
-              }
-            />
+            {/* AGORA SIM: Rota correta para a página de eventos */}
+            <Route path="eventos" element={<EventsPage />} />
+            <Route path="eventos/:id" element={<EventDetailsPage />} />{' '}
+            {/* Nova Rota Dinâmica */}
+            <Route path="perfil" element={<ProfilePage />} />
             <Route
               path="clientes"
               element={
@@ -108,7 +97,6 @@ function App() {
                 </div>
               }
             />
-            <Route path="perfil" element={<ProfilePage />} />
           </Route>
         </Routes>
       </AuthProvider>

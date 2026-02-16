@@ -1,136 +1,110 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
-import { Lock, Mail, Loader2, ArrowLeft } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 
 export function LoginPage() {
-  const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleAuth = async (e: React.FormEvent) => {
+  const { signIn } = useAuth();
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
 
     try {
-      if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-        if (error) throw error;
-        alert('Cadastro realizado! Verifique seu e-mail para confirmar.');
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-        navigate('/app');
-      }
-    } catch (error: any) {
-      alert(error.message || 'Erro ao autenticar');
+      await signIn(email, password);
+    } catch (err) {
+      setError('Credenciais inválidas. Tente novamente.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white px-4">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl p-8 border border-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 relative overflow-hidden">
+      {/* Background Decorativo */}
+      <div className="absolute top-0 left-0 w-full h-full z-0 pointer-events-none">
+        <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] bg-gold-200/20 rounded-full blur-[100px]"></div>
+        <div className="absolute bottom-[10%] -right-[10%] w-[40%] h-[40%] bg-gold-300/10 rounded-full blur-[100px]"></div>
+      </div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="bg-white p-8 md:p-12 rounded-3xl shadow-2xl w-full max-w-md relative z-10 border border-gray-100"
+      >
         <Link
           to="/"
-          className="inline-flex items-center text-sm text-gray-400 hover:text-gold-600 mb-8 transition-colors"
+          className="inline-flex items-center text-gray-400 hover:text-gold-500 transition-colors mb-8 text-sm font-medium"
         >
-          <ArrowLeft size={16} className="mr-2" />
-          Voltar para Home
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Voltar ao início
         </Link>
 
         <div className="text-center mb-10">
-          <div className="w-12 h-12 bg-black rounded-xl flex items-center justify-center shadow-lg mx-auto mb-4">
-            <span className="text-gold-500 font-bold text-2xl font-serif">
-              P
-            </span>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
-            {isSignUp ? 'Criar conta exclusiva' : 'Bem-vindo de volta'}
+          <h1 className="text-3xl font-playfair font-bold text-gray-900 mb-2">
+            Bem-vindo de volta
           </h1>
-          <p className="text-gray-500 mt-2 font-light">
-            {isSignUp
-              ? 'Inicie sua jornada de excelência.'
-              : 'Acesse seu painel de controle.'}
+          <p className="text-gray-500 text-sm">
+            Acesse sua área exclusiva de gestão.
           </p>
         </div>
 
-        <form onSubmit={handleAuth} className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               E-mail
             </label>
-            <div className="relative">
-              <Mail
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                size={20}
-              />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gold-500 focus:border-gold-500 outline-none transition-all bg-gray-50 focus:bg-white"
-                placeholder="seu@email.com"
-              />
-            </div>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none transition-all bg-gray-50 hover:bg-white"
+              placeholder="seu@email.com"
+              required
+            />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Senha
             </label>
-            <div className="relative">
-              <Lock
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                size={20}
-              />
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-gold-500 focus:border-gold-500 outline-none transition-all bg-gray-50 focus:bg-white"
-                placeholder="••••••••"
-                minLength={6}
-              />
-            </div>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none transition-all bg-gray-50 hover:bg-white"
+              placeholder="••••••••"
+              required
+            />
           </div>
+
+          {error && (
+            <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 flex items-center justify-center">
+              {error}
+            </div>
+          )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-black text-white py-3 rounded-xl font-bold hover:bg-gray-900 transition-all flex items-center justify-center disabled:opacity-70 disabled:cursor-not-allowed shadow-lg hover:shadow-xl hover:-translate-y-0.5 border border-transparent hover:border-gold-500/50"
+            className="w-full py-4 bg-gold-400 hover:bg-gold-500 text-black font-bold rounded-xl shadow-lg hover:shadow-gold-400/30 transition-all transform hover:-translate-y-1 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center"
           >
             {loading ? (
-              <Loader2 className="animate-spin text-gold-500" size={20} />
-            ) : isSignUp ? (
-              'Criar conta'
+              <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
-              'Entrar'
+              'Entrar na Plataforma'
             )}
           </button>
         </form>
-
-        <div className="mt-8 text-center text-sm text-gray-500">
-          {isSignUp ? 'Já é membro?' : 'Ainda não é membro?'}
-          <button
-            onClick={() => setIsSignUp(!isSignUp)}
-            className="ml-2 text-gold-600 font-bold hover:text-gold-700 hover:underline focus:outline-none"
-          >
-            {isSignUp ? 'Fazer Login' : 'Solicitar acesso'}
-          </button>
-        </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

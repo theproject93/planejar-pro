@@ -1,63 +1,82 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  type ReactNode,
+} from 'react';
+// GARANTA QUE O NOME AQUI BATE COM O ARQUIVO (Maiúscula/Minúscula)
+import { supabase } from '../lib/supabaseClient';
+import { type Session, type User } from '@supabase/supabase-js';
 
-// Tipagem do usuário
-interface User {
-  id: string;
-  name: string;
-  email: string;
-}
-
-// Tipagem do contexto
 interface AuthContextType {
   user: User | null;
-  signIn: (email: string, password: string) => Promise<void>;
-  signOut: () => void;
+  session: Session | null;
+  signIn: (email: string, password: string) => Promise<void>; // Mudou aqui
+  signOut: () => Promise<void>;
   isAuthenticated: boolean;
+  loading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
 
-  // Função de Login Fake
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Login com Senha
   const signIn = async (email: string, password: string) => {
-    // Simula um delay de API
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-    // Validação Hardcoded
-    if (email === 'admin@planejar.pro' && password === '123456') {
-      // Mudei aqui de "Arthur & Esposa" para "Admin Pro"
-      setUser({ id: '1', name: 'Admin Pro', email });
-      localStorage.setItem('@PlanejarPro:user', JSON.stringify({ email }));
-      navigate('/dashboard');
-    } else {
-      throw new Error('E-mail ou senha inválidos.');
-    }
+    if (error) throw error;
+    // Se der certo, o onAuthStateChange já atualiza o user e session
   };
 
-  const signOut = () => {
-    setUser(null);
-    localStorage.removeItem('@PlanejarPro:user');
-    navigate('/');
+  const signOut = async () => {
+    await supabase.auth.signOut();
   };
 
   return (
     <AuthContext.Provider
-      value={{ user, signIn, signOut, isAuthenticated: !!user }}
+      value={{
+        user,
+        session,
+        signIn,
+        signOut,
+        isAuthenticated: !!user,
+        loading,
+      }}
     >
-      {children}
+      {!loading && children}
     </AuthContext.Provider>
   );
 }
 
-// Hook personalizado para usar o contexto fácil
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) {
+  if (!context)
     throw new Error('useAuth deve ser usado dentro de um AuthProvider');
-  }
   return context;
 }

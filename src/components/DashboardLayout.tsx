@@ -85,12 +85,14 @@ export function DashboardLayout() {
           <div className="p-4 border-t border-gray-100 bg-gray-50/50">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-full bg-gold-500 text-white flex items-center justify-center font-bold shadow-sm">
-                {user?.name ? user.name.substring(0, 2).toUpperCase() : 'AD'}
+                {/* Pega a primeira letra do email se não tiver nome */}
+                {(user?.email?.charAt(0) || 'U').toUpperCase()}
               </div>
 
               <div className="flex-1 min-w-0">
+                {/* Exibe o email, já que ainda não salvamos o nome no metadata */}
                 <p className="text-sm font-bold text-gray-900 truncate">
-                  {user?.name || 'Admin'}
+                  {user?.email?.split('@')[0] || 'Usuário'}
                 </p>
                 <p className="text-xs text-gray-500 truncate">Administrador</p>
               </div>

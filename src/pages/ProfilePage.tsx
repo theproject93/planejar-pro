@@ -6,8 +6,12 @@ export function ProfilePage() {
   const { user } = useAuth();
 
   // Estados para o formulário
-  const [name, setName] = useState(user?.name || '');
-  const [email, setEmail] = useState(user?.email || '');
+  // Correção 1: Acessar name via user_metadata
+  const [name, setName] = useState(user?.user_metadata?.name || '');
+
+  // Correção 2: Remover setEmail já que o campo é disabled
+  const [email] = useState(user?.email || '');
+
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -42,7 +46,7 @@ export function ProfilePage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Coluna Esquerda: Cartão de Perfil Visual */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center h-fit">
-          <div className="w-32 h-32 rounded-full bg-gold-100 flex items-center justify-center text-gold-600 text-4xl font-bold mb-4 shadow-inner">
+          <div className="w-32 h-32 rounded-full bg-yellow-100 flex items-center justify-center text-yellow-600 text-4xl font-bold mb-4 shadow-inner">
             {name.substring(0, 2).toUpperCase()}
           </div>
           <h2 className="text-xl font-bold text-gray-900">{name}</h2>
@@ -59,7 +63,7 @@ export function ProfilePage() {
         <div className="lg:col-span-2 bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
           <form onSubmit={handleSave} className="space-y-6">
             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 border-b border-gray-100 pb-2">
-              <User className="w-5 h-5 text-gold-500" />
+              <User className="w-5 h-5 text-yellow-500" />
               Informações Pessoais
             </h3>
 
@@ -72,7 +76,7 @@ export function ProfilePage() {
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none transition-all"
+                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-yellow-400 focus:border-transparent outline-none transition-all"
                 />
               </div>
               <div>
@@ -92,7 +96,7 @@ export function ProfilePage() {
             </div>
 
             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 border-b border-gray-100 pb-2 pt-4">
-              <Lock className="w-5 h-5 text-gold-500" />
+              <Lock className="w-5 h-5 text-yellow-500" />
               Segurança
             </h3>
 
@@ -106,7 +110,7 @@ export function ProfilePage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Deixe em branco para manter"
-                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none transition-all"
+                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-yellow-400 focus:border-transparent outline-none transition-all"
                 />
               </div>
               <div>
@@ -118,7 +122,7 @@ export function ProfilePage() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Repita a nova senha"
-                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none transition-all"
+                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-yellow-400 focus:border-transparent outline-none transition-all"
                 />
               </div>
             </div>
@@ -133,7 +137,7 @@ export function ProfilePage() {
             <div className="pt-4 flex justify-end">
               <button
                 type="submit"
-                className="flex items-center px-6 py-3 bg-gold-500 hover:bg-gold-600 text-white font-bold rounded-xl shadow-lg hover:shadow-gold-500/30 transition-all transform hover:-translate-y-1"
+                className="flex items-center px-6 py-3 bg-yellow-500 hover:bg-yellow-600 text-white font-bold rounded-xl shadow-lg hover:shadow-yellow-500/30 transition-all transform hover:-translate-y-1"
               >
                 <Save className="w-5 h-5 mr-2" />
                 Salvar Alterações

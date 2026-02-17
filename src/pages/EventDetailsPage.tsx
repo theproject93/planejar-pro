@@ -1595,6 +1595,9 @@ export function EventDetailsPage() {
             newGuest={newGuest}
             setNewGuest={setNewGuest}
             addGuest={addGuest}
+            guests={guests}
+            toggleGuest={toggleGuest}
+            deleteGuest={deleteGuest}
             fileInputRef={fileInputRef}
             importCSV={importCSV}
           />

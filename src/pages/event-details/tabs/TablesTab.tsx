@@ -2,26 +2,13 @@ import React from 'react';
 import { LayoutGrid, MapPin, Plus, Trash2, X } from 'lucide-react';
 import { VisualMapTab } from './VisualMapTab';
 
-type TableViewMode = 'list' | 'map';
-
-export type GuestItem = {
-  id: string;
-  name: string;
-  // suporte aos dois nomes pra não quebrar agora
-  tableid?: string | null;
-  table_id?: string | null;
-};
-
-export type TableBase = {
-  id: string;
-  name: string;
-  seats: number;
-  note?: string | null;
-  posx?: number | null;
-  posy?: number | null;
-};
-
-type NewTable = { name: string; seats: number };
+import type {
+  GuestTableRef,
+  NewTable,
+  TableBase,
+  TableViewMode,
+} from '../types';
+import { getGuestTableId } from '../types';
 
 type Props<TTable extends TableBase = TableBase> = {
   eventId: string;
@@ -31,7 +18,7 @@ type Props<TTable extends TableBase = TableBase> = {
 
   tables: TTable[];
   setTables: React.Dispatch<React.SetStateAction<TTable[]>>;
-  guests: GuestItem[];
+  guests: GuestTableRef[];
 
   newTable: NewTable;
   setNewTable: React.Dispatch<React.SetStateAction<NewTable>>;
@@ -45,17 +32,13 @@ type Props<TTable extends TableBase = TableBase> = {
 
   saveTableNote: (tableId: string, note: string | null) => void | Promise<void>;
 
-  // Encapsulamento: quem salva no DB é o pai.
+  // Encapsulamento: quem persiste no DB é o pai.
   onPersistPosition: (
     tableId: string,
     x: number,
     y: number
   ) => void | Promise<void>;
 };
-
-function getGuestTableId(g: GuestItem) {
-  return g.tableid ?? g.table_id ?? null;
-}
 
 export function TablesTab<TTable extends TableBase = TableBase>({
   eventId,
@@ -124,7 +107,6 @@ export function TablesTab<TTable extends TableBase = TableBase>({
       )}
 
       <div className={tableViewMode === 'list' ? 'space-y-6' : 'hidden'}>
-        {/* Criar Mesa */}
         <div className="bg-white rounded-xl shadow-sm p-6 flex gap-4 items-center">
           <div className="p-3 bg-indigo-100 rounded-full text-indigo-600">
             <LayoutGrid className="w-6 h-6" />
@@ -159,7 +141,6 @@ export function TablesTab<TTable extends TableBase = TableBase>({
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Coluna: Convidados Sem Mesa */}
           <div className="bg-white rounded-xl shadow-sm p-6 lg:col-span-1 h-fit">
             <h3 className="font-bold text-gray-700 mb-4 flex justify-between">
               Sem Mesa
@@ -205,7 +186,6 @@ export function TablesTab<TTable extends TableBase = TableBase>({
             </div>
           </div>
 
-          {/* Coluna: Mesas */}
           <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
             {tables.map((table) => {
               const tableGuests = guests.filter(

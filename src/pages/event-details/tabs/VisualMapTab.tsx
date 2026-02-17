@@ -1,28 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Download } from 'lucide-react';
 
-type GuestItem = {
-  id: string;
-  tableid?: string | null;
-  table_id?: string | null; // compat
-};
-
-type TableBase = {
-  id: string;
-  name: string;
-  seats: number;
-  note?: string | null;
-  posx?: number | null;
-  posy?: number | null;
-};
+import type { GuestTableRef, TableBase } from '../types';
+import { getGuestTableId } from '../types';
 
 type Props<TTable extends TableBase = TableBase> = {
   eventId: string;
   tables: TTable[];
-  guests: GuestItem[];
+  guests: GuestTableRef[];
   onPositionsApplied?: (next: TTable[]) => void;
 
-  // Encapsulamento: quem salva no DB é o pai.
   onPersistPosition: (
     tableId: string,
     x: number,
@@ -40,10 +27,6 @@ function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
 
-function getGuestTableId(g: GuestItem) {
-  return g.tableid ?? g.table_id ?? null;
-}
-
 export function VisualMapTab<TTable extends TableBase = TableBase>({
   eventId: _eventId,
   tables,
@@ -56,10 +39,9 @@ export function VisualMapTab<TTable extends TableBase = TableBase>({
   const [positions, setPositions] = useState<
     Record<string, { x: number; y: number }>
   >({});
-
   const [dragId, setDragId] = useState<string | null>(null);
-  const dragOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
 
+  const dragOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const saveTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(
     null
   );
@@ -99,7 +81,6 @@ export function VisualMapTab<TTable extends TableBase = TableBase>({
 
   function persistTablePosition(tableId: string, x: number, y: number) {
     if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-
     saveTimeoutRef.current = window.setTimeout(async () => {
       await onPersistPosition(tableId, x, y);
     }, 250);

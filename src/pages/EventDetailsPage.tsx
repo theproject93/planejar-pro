@@ -37,6 +37,16 @@ import {
 } from 'recharts';
 
 import { supabase } from '../lib/supabaseClient';
+import { TasksTab } from './event-details/tabs/TasksTab';
+import { BudgetTab } from './event-details/tabs/BudgetTab';
+import { GuestsTab } from './event-details/tabs/GuestsTab';
+import { InvitesTab } from './event-details/tabs/InvitesTab';
+import { TimelineTab } from './event-details/tabs/TimelineTab';
+import { VendorsTab } from './event-details/tabs/VendorsTab';
+import { DocumentsTab } from './event-details/tabs/DocumentsTab';
+import { NotesTab } from './event-details/tabs/NotesTab';
+import { TeamTab } from './event-details/tabs/TeamTab';
+import { TablesTab } from './event-details/tabs/TablesTab';
 
 // --------------------
 // Config
@@ -250,238 +260,6 @@ const VENDOR_STATUS = {
 // --------------------
 // Visual Map (Mesas)
 // --------------------
-const GRID_SIZE = 20;
-
-function snapToGrid(v: number) {
-  return Math.round(v / GRID_SIZE) * GRID_SIZE;
-}
-
-function clamp(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, v));
-}
-
-function VisualMapTab({
-  eventId,
-  tables,
-  guests,
-  onPositionsApplied,
-}: {
-  eventId: string;
-  tables: TableRow[];
-  guests: GuestRow[];
-  onPositionsApplied?: (next: TableRow[]) => void;
-}) {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const [positions, setPositions] = useState<
-    Record<string, { x: number; y: number }>
-  >({});
-  const [dragId, setDragId] = useState<string | null>(null);
-  const dragOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
-  const saveTimeoutRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const initial: Record<string, { x: number; y: number }> = {};
-    tables.forEach((t, index) => {
-      if (typeof t.pos_x === 'number' && typeof t.pos_y === 'number') {
-        initial[t.id] = { x: t.pos_x, y: t.pos_y };
-        return;
-      }
-      const col = index % 3;
-      const row = Math.floor(index / 3);
-      initial[t.id] = { x: 80 + col * 240, y: 190 + row * 220 };
-    });
-    setPositions(initial);
-  }, [tables]);
-
-  const guestCountByTable = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const g of guests) {
-      if (!g.table_id) continue;
-      m[g.table_id] = (m[g.table_id] ?? 0) + 1;
-    }
-    return m;
-  }, [guests]);
-
-  async function persistTablePosition(tableId: string, x: number, y: number) {
-    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = window.setTimeout(async () => {
-      const { error } = await supabase
-        .from(T_TABLES)
-        .update({ pos_x: x, pos_y: y })
-        .eq('id', tableId);
-      if (error)
-        console.error('Erro ao salvar posição da mesa:', error.message);
-    }, 250);
-  }
-
-  function onPointerDown(e: React.PointerEvent, id: string) {
-    const map = mapRef.current;
-    if (!map) return;
-
-    (e.currentTarget as HTMLDivElement).setPointerCapture?.(e.pointerId);
-
-    const rect = map.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
-
-    const cur = positions[id] ?? { x: 0, y: 0 };
-    dragOffsetRef.current = { dx: px - cur.x, dy: py - cur.y };
-    setDragId(id);
-  }
-
-  function onPointerMove(e: React.PointerEvent) {
-    if (!dragId) return;
-    const map = mapRef.current;
-    if (!map) return;
-
-    const rect = map.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
-
-    const nextX = px - dragOffsetRef.current.dx;
-    const nextY = py - dragOffsetRef.current.dy;
-
-    const maxX = map.clientWidth - 200;
-    const maxY = map.clientHeight - 180;
-
-    setPositions((prev) => ({
-      ...prev,
-      [dragId]: {
-        x: clamp(nextX, 0, Math.max(0, maxX)),
-        y: clamp(nextY, 0, Math.max(0, maxY)),
-      },
-    }));
-  }
-
-  function onPointerUp() {
-    if (!dragId) return;
-
-    const cur = positions[dragId] ?? { x: 0, y: 0 };
-    const snapped = { x: snapToGrid(cur.x), y: snapToGrid(cur.y) };
-
-    setPositions((prev) => ({
-      ...prev,
-      [dragId]: snapped,
-    }));
-
-    persistTablePosition(dragId, snapped.x, snapped.y);
-
-    // opcional: mantém o state "tables" do pai alinhado com o DB
-    if (onPositionsApplied) {
-      onPositionsApplied(
-        tables.map((t) =>
-          t.id === dragId ? { ...t, pos_x: snapped.x, pos_y: snapped.y } : t
-        )
-      );
-    }
-
-    setDragId(null);
-  }
-
-  async function downloadPDF() {
-    if (!mapRef.current) return;
-
-    const html2canvasMod: any = await import('html2canvas-oklch');
-    const html2canvas = html2canvasMod.default ?? html2canvasMod;
-
-    const jspdfMod: any = await import('jspdf');
-    const jsPDF = jspdfMod.jsPDF ?? jspdfMod.default;
-
-    const canvas = await html2canvas(mapRef.current, {
-      scale: 2,
-      backgroundColor: '#ffffff',
-      useCORS: true,
-    });
-
-    const imgData = canvas.toDataURL('image/png');
-    const pdf = new jsPDF({
-      orientation: 'landscape',
-      unit: 'px',
-      format: [canvas.width, canvas.height],
-    });
-
-    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
-    pdf.save('mapa-de-mesas.pdf');
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex justify-end">
-        <button
-          onClick={downloadPDF}
-          className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-2"
-        >
-          <Download className="w-5 h-5" />
-          Baixar PDF
-        </button>
-      </div>
-
-      <div
-        ref={mapRef}
-        className="relative w-full h-[800px] bg-white border-2 border-dashed border-gray-300 rounded-xl overflow-hidden"
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerLeave={onPointerUp}
-        style={{
-          backgroundImage: 'radial-gradient(#d1d5db 1px, transparent 1px)',
-          backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
-        }}
-      >
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 w-[520px] h-[92px] border-4 border-black bg-white flex items-center justify-center">
-          <span className="text-5xl font-serif tracking-widest">ALTAR</span>
-        </div>
-
-        {tables.map((t) => {
-          const pos = positions[t.id] ?? { x: 0, y: 0 };
-          const count = guestCountByTable[t.id] ?? 0;
-
-          return (
-            <div
-              key={t.id}
-              onPointerDown={(e) => onPointerDown(e, t.id)}
-              className="absolute select-none"
-              style={{
-                left: pos.x,
-                top: pos.y,
-                width: 180,
-                height: 160,
-                cursor: dragId === t.id ? 'grabbing' : 'grab',
-                zIndex: dragId === t.id ? 50 : 10,
-              }}
-            >
-              <div
-                className="absolute inset-0 bg-black"
-                style={{
-                  clipPath:
-                    'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)',
-                }}
-              />
-              <div
-                className="absolute inset-[4px] bg-white flex flex-col items-center justify-center text-center px-3"
-                style={{
-                  clipPath:
-                    'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)',
-                }}
-              >
-                <div className="font-bold text-sm text-gray-900">{t.name}</div>
-
-                {t.note ? (
-                  <div className="mt-1 text-[11px] leading-tight text-gray-600 overflow-hidden max-h-[42px]">
-                    {t.note}
-                  </div>
-                ) : null}
-
-                <div className="mt-2 text-[11px] text-gray-500">
-                  {count} / {t.seats} lugares
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 export function EventDetailsPage() {
   const { id } = useParams<{ id: string }>();
@@ -842,6 +620,24 @@ export function EventDetailsPage() {
   // --------------------
   // Tasks CRUD
   // --------------------
+  async function saveTableNote(tableId: string, note: string | null) {
+    const { error } = await supabase
+      .from(T_TABLES)
+      .update({ note })
+      .eq('id', tableId);
+
+    if (error) setErrorMsg(error.message);
+  }
+
+  async function persistTablePosition(tableId: string, x: number, y: number) {
+    const { error } = await supabase
+      .from(T_TABLES)
+      .update({ posx: x, posy: y })
+      .eq('id', tableId);
+
+    if (error) setErrorMsg(error.message);
+  }
+
   async function addTask() {
     const text = newTaskText.trim();
     if (!text || !eventId) return;
@@ -1329,6 +1125,7 @@ export function EventDetailsPage() {
   // --------------------
   // Tables CRUD
   // --------------------
+
   async function addTable() {
     if (!newTable.name.trim() || !eventId) return;
     try {
@@ -1757,1070 +1554,123 @@ export function EventDetailsPage() {
         )}
 
         {activeTab === 'tasks' && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-4">
-              <input
-                value={newTaskText}
-                onChange={(e) => setNewTaskText(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && addTask()}
-                placeholder="Nova tarefa..."
-                className="md:col-span-4 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <input
-                type="date"
-                value={newTaskDueDate}
-                onChange={(e) => setNewTaskDueDate(e.target.value)}
-                className="md:col-span-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <select
-                value={newTaskPriority}
-                onChange={(e) => setNewTaskPriority(e.target.value as any)}
-                className="md:col-span-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              >
-                <option value="low">Baixa</option>
-                <option value="normal">Normal</option>
-                <option value="high">Alta</option>
-                <option value="urgent">Urgente</option>
-              </select>
-              <input
-                value={newTaskAssignee}
-                onChange={(e) => setNewTaskAssignee(e.target.value)}
-                placeholder="Responsável"
-                className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <button
-                onClick={addTask}
-                className="md:col-span-1 px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors"
-              >
-                <Plus className="w-5 h-5 mx-auto" />
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {tasks.map((t, idx) => (
-                <div
-                  key={t.id}
-                  draggable
-                  onDragStart={() => onTaskDragStart(idx)}
-                  onDragOver={(e) => onTaskDragOver(e, idx)}
-                  onDragEnd={onTaskDragEnd}
-                  className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100"
-                >
-                  <GripVertical className="w-5 h-5 text-gray-400" />
-                  <input
-                    type="checkbox"
-                    checked={t.completed}
-                    onChange={() => toggleTask(t.id)}
-                    className="w-5 h-5"
-                  />
-                  <div className="flex-1">
-                    <span
-                      className={`block ${t.completed ? 'line-through text-gray-500' : 'text-gray-800'}`}
-                    >
-                      {t.text}
-                    </span>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                      {t.due_date && (
-                        <span
-                          className={`inline-flex items-center gap-1 ${
-                            isOverdue(t.due_date) && !t.completed
-                              ? 'text-red-600 font-medium'
-                              : ''
-                          }`}
-                        >
-                          <Calendar className="w-3 h-3" />
-                          {formatDate(t.due_date)}
-                        </span>
-                      )}
-                      {t.priority && t.priority !== 'normal' && (
-                        <span
-                          className={`inline-flex items-center gap-1 ${PRIORITY_CONFIG[t.priority].color}`}
-                        >
-                          {PRIORITY_CONFIG[t.priority].icon &&
-                            (() => {
-                              const Icon = PRIORITY_CONFIG[t.priority].icon!;
-                              return <Icon className="w-3 h-3" />;
-                            })()}
-                          {PRIORITY_CONFIG[t.priority].label}
-                        </span>
-                      )}
-                      {t.assignee_name && <span>→ {t.assignee_name}</span>}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => deleteTask(t.id)}
-                    className="p-1 text-red-600 hover:bg-red-50 rounded"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-              {tasks.length === 0 && (
-                <p className="text-gray-600 py-8 text-center">
-                  Nenhuma tarefa cadastrada.
-                </p>
-              )}
-            </div>
-          </div>
+          <TasksTab
+            tasks={tasks}
+            newTaskText={newTaskText}
+            setNewTaskText={setNewTaskText}
+            newTaskDueDate={newTaskDueDate}
+            setNewTaskDueDate={setNewTaskDueDate}
+            newTaskPriority={newTaskPriority as any}
+            setNewTaskPriority={setNewTaskPriority as any}
+            newTaskAssignee={newTaskAssignee}
+            setNewTaskAssignee={setNewTaskAssignee}
+            addTask={addTask}
+            toggleTask={toggleTask}
+            deleteTask={deleteTask}
+            onTaskDragStart={onTaskDragStart}
+            onTaskDragOver={onTaskDragOver}
+            onTaskDragEnd={onTaskDragEnd}
+            formatDate={formatDate}
+            isOverdue={isOverdue}
+            priorityConfig={PRIORITY_CONFIG}
+          />
         )}
 
         {activeTab === 'budget' && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex gap-2 mb-4">
-              <input
-                value={newExpense.name}
-                onChange={(e) =>
-                  setNewExpense((p) => ({ ...p, name: e.target.value }))
-                }
-                placeholder="Categoria (ex: Buffet)"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <input
-                value={newExpense.value}
-                onChange={(e) =>
-                  setNewExpense((p) => ({ ...p, value: e.target.value }))
-                }
-                placeholder="Valor"
-                type="number"
-                className="w-36 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <button
-                onClick={addExpense}
-                className="px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors"
-              >
-                <Plus className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-2 px-3 text-gray-700">
-                      Categoria
-                    </th>
-                    <th className="text-right py-2 px-3 text-gray-700">
-                      Valor
-                    </th>
-                    <th className="w-16" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {expenses.map((e) => (
-                    <tr key={e.id} className="border-b">
-                      <td className="py-2 px-3">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="w-3 h-3 rounded"
-                            style={{ backgroundColor: e.color }}
-                          />
-                          <input
-                            value={e.name}
-                            onChange={(ev) =>
-                              setExpenses((prev) =>
-                                prev.map((x) =>
-                                  x.id === e.id
-                                    ? { ...x, name: ev.target.value }
-                                    : x
-                                )
-                              )
-                            }
-                            onBlur={(ev) =>
-                              updateExpense(e.id, {
-                                name: ev.target.value.trim(),
-                              })
-                            }
-                            className="w-full bg-transparent focus:outline-none"
-                          />
-                        </div>
-                      </td>
-                      <td className="py-2 px-3 text-right">
-                        <input
-                          value={e.value}
-                          type="number"
-                          onChange={(ev) =>
-                            setExpenses((prev) =>
-                              prev.map((x) =>
-                                x.id === e.id
-                                  ? { ...x, value: Number(ev.target.value) }
-                                  : x
-                              )
-                            )
-                          }
-                          onBlur={(ev) =>
-                            updateExpense(e.id, {
-                              value: Number(ev.target.value) || 0,
-                            })
-                          }
-                          className="w-40 text-right bg-transparent focus:outline-none"
-                        />
-                      </td>
-                      <td className="py-2 px-3 text-right">
-                        <button
-                          onClick={() => deleteExpense(e.id)}
-                          className="p-1 text-red-600 hover:bg-red-50 rounded"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {expenses.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={3}
-                        className="py-4 text-gray-600 text-center"
-                      >
-                        Nenhuma despesa cadastrada.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td className="py-2 px-3 font-semibold text-gray-800">
-                      Total
-                    </td>
-                    <td className="py-2 px-3 text-right font-semibold text-gray-800">
-                      {toBRL(totalSpent)}
-                    </td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
+          <BudgetTab
+            expenses={expenses}
+            setExpenses={setExpenses}
+            newExpense={newExpense}
+            setNewExpense={setNewExpense}
+            addExpense={addExpense}
+            updateExpense={updateExpense}
+            deleteExpense={deleteExpense}
+            totalSpent={totalSpent}
+            toBRL={toBRL}
+          />
         )}
 
         {activeTab === 'guests' && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex flex-col md:flex-row gap-2 mb-4">
-              <input
-                value={newGuest.name}
-                onChange={(e) =>
-                  setNewGuest((p) => ({ ...p, name: e.target.value }))
-                }
-                placeholder="Nome"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <input
-                value={newGuest.phone}
-                onChange={(e) =>
-                  setNewGuest((p) => ({ ...p, phone: e.target.value }))
-                }
-                placeholder="Telefone (opcional)"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <button
-                onClick={addGuest}
-                className="px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors"
-              >
-                <Plus className="w-5 h-5" />
-              </button>
-            </div>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) importCSV(f);
-                e.currentTarget.value = '';
-              }}
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full mb-4 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg hover:border-pink-500 hover:bg-pink-50 transition-colors flex items-center justify-center gap-2 text-gray-700"
-            >
-              <Upload className="w-5 h-5" />
-              Importar CSV (Nome,Telefone)
-            </button>
-
-            <div className="space-y-2">
-              {guests.map((g) => (
-                <div
-                  key={g.id}
-                  className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"
-                >
-                  <input
-                    type="checkbox"
-                    checked={g.confirmed}
-                    onChange={() => toggleGuest(g.id)}
-                    className="w-5 h-5"
-                  />
-                  <div className="flex-1">
-                    <p className="text-gray-800 font-medium">{g.name}</p>
-                    {g.phone && (
-                      <p className="text-sm text-gray-500 inline-flex items-center gap-1">
-                        <Phone className="w-3 h-3" />
-                        {g.phone}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => deleteGuest(g.id)}
-                    className="p-1 text-red-600 hover:bg-red-50 rounded"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-              {guests.length === 0 && (
-                <p className="text-gray-600 py-8 text-center">
-                  Nenhum convidado cadastrado.
-                </p>
-              )}
-            </div>
-          </div>
+          <GuestsTab
+            newGuest={newGuest}
+            setNewGuest={setNewGuest}
+            addGuest={addGuest}
+            fileInputRef={fileInputRef}
+            importCSV={importCSV}
+          />
         )}
 
         {activeTab === 'timeline' && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex gap-2 mb-4">
-              <input
-                type="time"
-                value={newTimelineItem.time}
-                onChange={(e) =>
-                  setNewTimelineItem((p) => ({ ...p, time: e.target.value }))
-                }
-                className="w-32 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <input
-                value={newTimelineItem.activity}
-                onChange={(e) =>
-                  setNewTimelineItem((p) => ({
-                    ...p,
-                    activity: e.target.value,
-                  }))
-                }
-                placeholder="Atividade (ex: Cerimônia)"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <input
-                value={newTimelineItem.assignee}
-                onChange={(e) =>
-                  setNewTimelineItem((p) => ({
-                    ...p,
-                    assignee: e.target.value,
-                  }))
-                }
-                placeholder="Responsável"
-                className="w-40 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <button
-                onClick={addTimelineItem}
-                className="px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors"
-              >
-                <Plus className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              {timeline.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-start gap-4 p-4 bg-gray-50 rounded-lg"
-                >
-                  <div className="flex-shrink-0 w-20 text-center">
-                    <p className="text-lg font-bold text-pink-600">
-                      {item.time}
-                    </p>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-gray-800 font-medium">{item.activity}</p>
-                    {item.assignee_name && (
-                      <p className="text-sm text-gray-600 mt-1">
-                        Responsável: {item.assignee_name}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => deleteTimelineItem(item.id)}
-                    className="p-1 text-red-600 hover:bg-red-50 rounded"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-              {timeline.length === 0 && (
-                <p className="text-gray-600 py-8 text-center">
-                  Nenhum item no cronograma ainda.
-                </p>
-              )}
-            </div>
-          </div>
+          <TimelineTab
+            newTimelineItem={newTimelineItem}
+            setNewTimelineItem={setNewTimelineItem}
+            onAdd={addTimelineItem}
+            timeline={timeline}
+            onDelete={deleteTimelineItem}
+          />
         )}
 
         {activeTab === 'vendors' && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-4">
-              <input
-                value={newVendor.name}
-                onChange={(e) =>
-                  setNewVendor((p) => ({ ...p, name: e.target.value }))
-                }
-                placeholder="Nome do fornecedor"
-                className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <input
-                value={newVendor.category}
-                onChange={(e) =>
-                  setNewVendor((p) => ({ ...p, category: e.target.value }))
-                }
-                placeholder="Categoria (ex: Fotografia)"
-                className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <input
-                value={newVendor.phone}
-                onChange={(e) =>
-                  setNewVendor((p) => ({ ...p, phone: e.target.value }))
-                }
-                placeholder="Telefone"
-                className="md:col-span-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <input
-                value={newVendor.email}
-                onChange={(e) =>
-                  setNewVendor((p) => ({ ...p, email: e.target.value }))
-                }
-                placeholder="Email"
-                className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <button
-                onClick={addVendor}
-                className="md:col-span-1 px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors"
-              >
-                <Plus className="w-5 h-5 mx-auto" />
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {vendors.map((v) => (
-                <div
-                  key={v.id}
-                  className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="text-gray-800 font-medium">{v.name}</p>
-                      <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600">
-                        {v.category}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3 mt-1 text-sm text-gray-600">
-                      {v.phone && (
-                        <span className="inline-flex items-center gap-1">
-                          <Phone className="w-3 h-3" />
-                          {v.phone}
-                        </span>
-                      )}
-                      {v.email && (
-                        <span className="inline-flex items-center gap-1">
-                          <Mail className="w-3 h-3" />
-                          {v.email}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <select
-                    value={v.status}
-                    onChange={(e) =>
-                      updateVendorStatus(v.id, e.target.value as any)
-                    }
-                    className={`px-3 py-1 rounded text-sm font-medium ${VENDOR_STATUS[v.status].bg} ${
-                      VENDOR_STATUS[v.status].color
-                    }`}
-                  >
-                    <option value="pending">Pendente</option>
-                    <option value="confirmed">Confirmado</option>
-                    <option value="paid">Pago</option>
-                    <option value="cancelled">Cancelado</option>
-                  </select>
-
-                  <button
-                    onClick={() => deleteVendor(v.id)}
-                    className="p-1 text-red-600 hover:bg-red-50 rounded"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-              {vendors.length === 0 && (
-                <p className="text-gray-600 py-8 text-center">
-                  Nenhum fornecedor cadastrado.
-                </p>
-              )}
-            </div>
-          </div>
+          <VendorsTab
+            newVendor={newVendor}
+            setNewVendor={setNewVendor}
+            onAdd={addVendor}
+            vendors={vendors}
+            onStatusChange={updateVendorStatus}
+            onDelete={deleteVendor}
+          />
         )}
 
         {activeTab === 'documents' && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <input
-              ref={docInputRef}
-              type="file"
-              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) uploadDocument(f);
-                e.currentTarget.value = '';
-              }}
-            />
-            <button
-              onClick={() => docInputRef.current?.click()}
-              disabled={uploadingDoc}
-              className="w-full mb-4 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg hover:border-pink-500 hover:bg-pink-50 transition-colors flex items-center justify-center gap-2 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Upload className="w-5 h-5" />
-              {uploadingDoc
-                ? 'Enviando documento...'
-                : 'Upload de documento (PDF, DOC, Imagem)'}
-            </button>
-
-            <div className="space-y-2">
-              {documents.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg"
-                >
-                  <FileText className="w-8 h-8 text-gray-600" />
-                  <div className="flex-1">
-                    <p className="text-gray-800 font-medium">{doc.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {doc.category || 'Outros'}
-                    </p>
-                  </div>
-                  <a
-                    href={doc.file_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-2 text-blue-600 hover:bg-blue-50 rounded"
-                  >
-                    <Download className="w-4 h-4" />
-                  </a>
-                  <button
-                    onClick={() => deleteDocument(doc.id)}
-                    className="p-2 text-red-600 hover:bg-red-50 rounded"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-              {documents.length === 0 && (
-                <p className="text-gray-600 py-8 text-center">
-                  Nenhum documento enviado ainda.
-                </p>
-              )}
-            </div>
-          </div>
+          <DocumentsTab
+            docInputRef={docInputRef}
+            uploadingDoc={uploadingDoc}
+            onPickFile={uploadDocument}
+            documents={documents}
+            onDelete={deleteDocument}
+          />
         )}
 
         {activeTab === 'notes' && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex gap-2 mb-4">
-              <textarea
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                placeholder="Nova nota/lembrete..."
-                rows={2}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent resize-none"
-              />
-              <button
-                onClick={addNote}
-                className="px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors self-start"
-              >
-                <Plus className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {notes.map((note) => (
-                <div
-                  key={note.id}
-                  className="p-4 rounded-lg shadow-sm relative"
-                  style={{ backgroundColor: note.color }}
-                >
-                  <button
-                    onClick={() => deleteNote(note.id)}
-                    className="absolute top-2 right-2 p-1 text-gray-600 hover:text-red-600"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                  <p className="text-gray-800 text-sm whitespace-pre-wrap pr-8">
-                    {note.content}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-2">
-                    {note.created_at &&
-                      new Date(note.created_at).toLocaleString('pt-BR')}
-                  </p>
-                </div>
-              ))}
-              {notes.length === 0 && (
-                <p className="text-gray-600 py-8 text-center col-span-full">
-                  Nenhuma nota criada ainda.
-                </p>
-              )}
-            </div>
-          </div>
+          <NotesTab
+            newNote={newNote}
+            setNewNote={setNewNote}
+            onAdd={addNote}
+            notes={notes}
+            onDelete={deleteNote}
+          />
         )}
 
         {activeTab === 'team' && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-              <Briefcase className="w-5 h-5 text-purple-500" />
-              Equipe de Cerimonial
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-6 p-4 bg-gray-50 rounded-lg border border-gray-100">
-              <input
-                value={newTeamMember.name}
-                onChange={(e) =>
-                  setNewTeamMember((p) => ({ ...p, name: e.target.value }))
-                }
-                placeholder="Nome completo"
-                className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <input
-                value={newTeamMember.role}
-                onChange={(e) =>
-                  setNewTeamMember((p) => ({ ...p, role: e.target.value }))
-                }
-                placeholder="Função (ex: Recepcionista)"
-                className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <input
-                value={newTeamMember.phone}
-                onChange={(e) =>
-                  setNewTeamMember((p) => ({ ...p, phone: e.target.value }))
-                }
-                placeholder="Telefone / WhatsApp"
-                className="md:col-span-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <input
-                value={newTeamMember.address}
-                onChange={(e) =>
-                  setNewTeamMember((p) => ({ ...p, address: e.target.value }))
-                }
-                placeholder="Endereço"
-                className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              />
-              <button
-                onClick={addTeamMember}
-                className="md:col-span-1 px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors flex items-center justify-center"
-              >
-                <Plus className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {team.map((member) => (
-                <div
-                  key={member.id}
-                  className="group relative bg-white border border-gray-200 p-5 rounded-xl hover:shadow-md transition-shadow"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-bold">
-                        {member.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-gray-800">
-                          {member.name}
-                        </h4>
-                        <span className="text-xs font-medium px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full">
-                          {member.role || 'Membro'}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => deleteTeamMember(member.id)}
-                      className="text-gray-400 hover:text-red-500 transition-colors p-1"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <div className="space-y-2 text-sm text-gray-600">
-                    {member.phone && (
-                      <div className="flex items-center gap-2">
-                        <Phone className="w-4 h-4 text-gray-400" />
-                        <span>{member.phone}</span>
-                      </div>
-                    )}
-                    {member.address && (
-                      <div className="flex items-center gap-2">
-                        <MapPin className="w-4 h-4 text-gray-400" />
-                        <span className="truncate" title={member.address}>
-                          {member.address}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {team.length === 0 && (
-                <div className="col-span-full py-10 text-center text-gray-500 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
-                  <Users className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                  <p>Nenhum membro na equipe ainda.</p>
-                  <p className="text-sm">
-                    Adicione cerimonialistas, recepcionistas e seguranças aqui.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
+          <TeamTab
+            newTeamMember={newTeamMember}
+            setNewTeamMember={setNewTeamMember}
+            onAdd={addTeamMember}
+            team={team}
+            onDelete={deleteTeamMember}
+          />
         )}
 
         {activeTab === 'tables' && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl shadow-sm">
-              <div>
-                <h3 className="text-lg font-bold text-gray-800">
-                  Organização de Mesas
-                </h3>
-                <p className="text-sm text-gray-500">
-                  Alterne entre lista e mapa visual (arraste e solte).
-                </p>
-              </div>
-              <div className="flex bg-gray-100 p-1 rounded-lg">
-                <button
-                  onClick={() => setTableViewMode('list')}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
-                    tableViewMode === 'list'
-                      ? 'bg-white text-gray-900 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <LayoutGrid className="w-4 h-4" />
-                  Lista
-                </button>
-                <button
-                  onClick={() => setTableViewMode('map')}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
-                    tableViewMode === 'map'
-                      ? 'bg-white text-gray-900 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <MapPin className="w-4 h-4" />
-                  Mapa
-                </button>
-              </div>
-            </div>
-
-            {tableViewMode === 'map' && (
-              <VisualMapTab
-                eventId={eventId}
-                tables={tables}
-                guests={guests}
-                onPositionsApplied={(next) => setTables(next)}
-              />
-            )}
-
-            <div className={tableViewMode === 'list' ? 'space-y-6' : 'hidden'}>
-              {/* Criar Mesa */}
-              <div className="bg-white rounded-xl shadow-sm p-6 flex gap-4 items-center">
-                <div className="p-3 bg-indigo-100 rounded-full text-indigo-600">
-                  <LayoutGrid className="w-6 h-6" />
-                </div>
-                <input
-                  value={newTable.name}
-                  onChange={(e) =>
-                    setNewTable((p) => ({ ...p, name: e.target.value }))
-                  }
-                  placeholder="Nome da Mesa (ex: Família Noiva)"
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
-                />
-                <input
-                  type="number"
-                  value={newTable.seats}
-                  onChange={(e) =>
-                    setNewTable((p) => ({
-                      ...p,
-                      seats: Number(e.target.value),
-                    }))
-                  }
-                  placeholder="Lugares"
-                  className="w-24 px-4 py-2 border border-gray-300 rounded-lg"
-                />
-                <button
-                  onClick={addTable}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-                >
-                  <Plus className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Coluna: Convidados Sem Mesa */}
-                <div className="bg-white rounded-xl shadow-sm p-6 lg:col-span-1 h-fit">
-                  <h3 className="font-bold text-gray-700 mb-4 flex justify-between">
-                    Sem Mesa
-                    <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">
-                      {guests.filter((g) => !g.table_id).length}
-                    </span>
-                  </h3>
-                  <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                    {guests
-                      .filter((g) => !g.table_id)
-                      .map((guest) => (
-                        <div
-                          key={guest.id}
-                          className="p-3 bg-gray-50 rounded-lg border border-gray-100 flex justify-between items-center group"
-                        >
-                          <span className="text-sm text-gray-700">
-                            {guest.name}
-                          </span>
-                          <div className="relative group-hover:block hidden">
-                            <select
-                              onChange={(e) =>
-                                assignGuestToTable(guest.id, e.target.value)
-                              }
-                              className="text-xs bg-white border border-gray-300 rounded px-1 py-1"
-                              defaultValue=""
-                            >
-                              <option value="" disabled>
-                                Mover para...
-                              </option>
-                              {tables.map((t) => (
-                                <option key={t.id} value={t.id}>
-                                  {t.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                      ))}
-                    {guests.filter((g) => !g.table_id).length === 0 && (
-                      <p className="text-gray-400 text-sm text-center italic">
-                        Todos sentados! 🎉
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Coluna: Mesas */}
-                <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {tables.map((table) => {
-                    const tableGuests = guests.filter(
-                      (g) => g.table_id === table.id
-                    );
-                    const isFull = tableGuests.length >= table.seats;
-
-                    return (
-                      <div
-                        key={table.id}
-                        className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
-                      >
-                        <div className="p-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
-                          <div>
-                            <h4 className="font-bold text-gray-800">
-                              {table.name}
-                            </h4>
-                            <input
-                              value={table.note ?? ''}
-                              onChange={(e) =>
-                                setTables((prev) =>
-                                  prev.map((x) =>
-                                    x.id === table.id
-                                      ? { ...x, note: e.target.value }
-                                      : x
-                                  )
-                                )
-                              }
-                              onBlur={async (e) => {
-                                const note = e.target.value.trim();
-                                const { error } = await supabase
-                                  .from(T_TABLES)
-                                  .update({ note: note || null })
-                                  .eq('id', table.id);
-                                if (error) setErrorMsg(error.message);
-                                setTables((prev) =>
-                                  prev.map((x) =>
-                                    x.id === table.id
-                                      ? { ...x, note: note || null }
-                                      : x
-                                  )
-                                );
-                              }}
-                              placeholder="Observação (ex: Família do cunhado...)"
-                              className="mt-2 w-full text-xs px-2 py-1 border border-gray-200 rounded"
-                            />
-                            <span
-                              className={`text-xs px-2 py-0.5 rounded-full ${
-                                isFull
-                                  ? 'bg-red-100 text-red-600'
-                                  : 'bg-green-100 text-green-600'
-                              }`}
-                            >
-                              {tableGuests.length} / {table.seats} lugares
-                            </span>
-                          </div>
-                          <button
-                            onClick={() => deleteTable(table.id)}
-                            className="text-gray-400 hover:text-red-500"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                        <div className="p-4 min-h-[100px]">
-                          {tableGuests.length > 0 ? (
-                            <div className="space-y-2">
-                              {tableGuests.map((g) => (
-                                <div
-                                  key={g.id}
-                                  className="flex justify-between items-center text-sm p-2 hover:bg-gray-50 rounded"
-                                >
-                                  <span className="text-gray-700 truncate">
-                                    {g.name}
-                                  </span>
-                                  <button
-                                    onClick={() =>
-                                      assignGuestToTable(g.id, null)
-                                    }
-                                    className="text-gray-400 hover:text-red-500"
-                                    title="Remover da mesa"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-center text-gray-400 text-xs py-4">
-                              Mesa vazia
-                            </p>
-                          )}
-
-                          {!isFull && (
-                            <select
-                              onChange={(e) =>
-                                assignGuestToTable(e.target.value, table.id)
-                              }
-                              className="mt-3 w-full text-xs bg-white border border-dashed border-gray-300 rounded px-2 py-2 text-gray-500 hover:border-indigo-400 cursor-pointer"
-                              value=""
-                            >
-                              <option value="" disabled>
-                                + Adicionar convidado...
-                              </option>
-                              {guests
-                                .filter((g) => !g.table_id)
-                                .map((g) => (
-                                  <option key={g.id} value={g.id}>
-                                    {g.name}
-                                  </option>
-                                ))}
-                            </select>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
+          <TablesTab
+            eventId={eventId}
+            tableViewMode={tableViewMode}
+            setTableViewMode={setTableViewMode}
+            tables={tables}
+            setTables={setTables}
+            guests={guests}
+            newTable={newTable}
+            setNewTable={setNewTable}
+            addTable={addTable}
+            deleteTable={deleteTable}
+            assignGuestToTable={assignGuestToTable}
+            saveTableNote={saveTableNote}
+            onPersistPosition={persistTablePosition}
+          />
         )}
 
-        {activeTab === 'invites' && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
-              <Share2 className="w-5 h-5 text-green-500" />
-              Envio de Convites Digitais
-            </h3>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Configuração da Mensagem */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Modelo da Mensagem (WhatsApp)
-                </label>
-                <div className="p-4 bg-green-50 rounded-lg border border-green-100 text-gray-800 text-sm whitespace-pre-line">
-                  Olá <strong>[Nome do Convidado]</strong>! 👋
-                  <br />
-                  <br />
-                  Você foi convidado(a) com muito carinho para{' '}
-                  <strong>{event.couple || event.name}</strong>!
-                  <br />
-                  <br />
-                  📅 Data:{' '}
-                  {event.event_date
-                    ? new Date(event.event_date).toLocaleDateString('pt-BR')
-                    : 'A definir'}
-                  <br />
-                  📍 Local: {event.location || 'A definir'}
-                  <br />
-                  <br />
-                  Por favor, confirme sua presença respondendo esta mensagem.
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  * Dica: Futuramente teremos um link de confirmação automática
-                  aqui.
-                </p>
-              </div>
-
-              {/* Lista de Envios */}
-              <div>
-                <h4 className="font-bold text-gray-700 mb-4">
-                  Enviar para convidados
-                </h4>
-                <div className="border border-gray-200 rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
-                  {guests.map((guest) => {
-                    // Gera o link do WhatsApp
-                    const message = `Olá ${guest.name}! 👋\n\nVocê foi convidado(a) com muito carinho para ${
-                      event.couple || event.name
-                    }!\n\n📅 Data: ${
-                      event.event_date
-                        ? new Date(event.event_date).toLocaleDateString('pt-BR')
-                        : 'A definir'
-                    }\n📍 Local: ${event.location || 'A definir'}\n\nPor favor, confirme sua presença!`;
-                    const encodedMsg = encodeURIComponent(message);
-                    const phone = guest.phone
-                      ? guest.phone.replace(/\D/g, '')
-                      : '';
-                    const hasPhone = phone.length >= 10;
-
-                    return (
-                      <div
-                        key={guest.id}
-                        className="flex justify-between items-center p-3 border-b last:border-0 hover:bg-gray-50"
-                      >
-                        <div>
-                          <p className="text-gray-800 font-medium">
-                            {guest.name}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {guest.phone || 'Sem telefone'}
-                          </p>
-                        </div>
-
-                        {hasPhone ? (
-                          <a
-                            href={`https://wa.me/55${phone}?text=${encodedMsg}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 px-3 py-1.5 bg-green-500 text-white text-xs font-bold rounded hover:bg-green-600 transition-colors"
-                          >
-                            <MessageCircle className="w-3 h-3" />
-                            Enviar
-                          </a>
-                        ) : (
-                          <span className="text-xs text-gray-400 italic">
-                            Add telefone
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
+        {activeTab === 'invites' && event && (
+          <InvitesTab event={event} guests={guests} />
         )}
 
         {/* Modal: editar básicos */}

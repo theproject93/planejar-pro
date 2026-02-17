@@ -19,12 +19,13 @@ import {
   Zap,
   Camera,
   FileText,
-  StickyNote,
-  TrendingUp,
-  Mail,
   Briefcase,
+  LayoutGrid,
+  MessageCircle,
+  Share2,
   Download,
   Bell,
+  Mail,
 } from 'lucide-react';
 import {
   PieChart,
@@ -48,6 +49,8 @@ const T_TIMELINE = 'event_timeline';
 const T_VENDORS = 'event_vendors';
 const T_DOCUMENTS = 'event_documents';
 const T_NOTES = 'event_notes';
+const T_TEAM = 'event_team_members';
+const T_TABLES = 'event_tables';
 
 const COLORS = [
   '#EAB308',
@@ -67,7 +70,10 @@ type Tab =
   | 'timeline'
   | 'vendors'
   | 'documents'
-  | 'notes';
+  | 'notes'
+  | 'team'
+  | 'tables'
+  | 'invites';
 
 type EventRow = {
   id: string;
@@ -111,6 +117,8 @@ type GuestRow = {
   name: string;
   phone: string | null;
   confirmed: boolean;
+  table_id?: string | null;
+  invite_token?: string;
   created_at?: string;
 };
 
@@ -154,6 +162,25 @@ type NoteRow = {
   color: string;
   created_at?: string;
   updated_at?: string;
+};
+
+type TeamMemberRow = {
+  id: string;
+  event_id: string;
+  name: string;
+  phone?: string | null;
+  address?: string | null;
+  role?: string | null;
+  created_at?: string;
+};
+
+type TableRow = {
+  id: string;
+  event_id: string;
+  name: string;
+  seats: number;
+  shape: 'round' | 'rectangular';
+  created_at?: string;
 };
 
 function toBRL(value: number) {
@@ -242,6 +269,8 @@ export function EventDetailsPage() {
   const [vendors, setVendors] = useState<VendorRow[]>([]);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
+  const [team, setTeam] = useState<TeamMemberRow[]>([]);
+  const [tables, setTables] = useState<TableRow[]>([]);
 
   const tasksRef = useRef<TaskRow[]>([]);
   useEffect(() => {
@@ -270,6 +299,13 @@ export function EventDetailsPage() {
     email: '',
   });
   const [newNote, setNewNote] = useState('');
+  const [newTeamMember, setNewTeamMember] = useState({
+    name: '',
+    phone: '',
+    address: '',
+    role: '',
+  });
+  const [newTable, setNewTable] = useState({ name: '', seats: 8 });
 
   const [draggedTaskIndex, setDraggedTaskIndex] = useState<number | null>(null);
 
@@ -401,6 +437,8 @@ export function EventDetailsPage() {
           vendorsRes,
           docsRes,
           notesRes,
+          teamRes,
+          tablesRes,
         ] = await Promise.all([
           supabase.from(T_EVENTS).select('*').eq('id', eventId).single(),
           supabase
@@ -438,6 +476,16 @@ export function EventDetailsPage() {
             .select('*')
             .eq('event_id', eventId)
             .order('created_at', { ascending: false }),
+          supabase
+            .from(T_TEAM)
+            .select('*')
+            .eq('event_id', eventId)
+            .order('name', { ascending: true }),
+          supabase
+            .from(T_TABLES)
+            .select('*')
+            .eq('event_id', eventId)
+            .order('created_at', { ascending: true }),
         ]);
 
         if (eventRes.error) throw eventRes.error;
@@ -448,6 +496,8 @@ export function EventDetailsPage() {
         if (vendorsRes.error) throw vendorsRes.error;
         if (docsRes.error) throw docsRes.error;
         if (notesRes.error) throw notesRes.error;
+        if (teamRes.error) throw teamRes.error;
+        if (tablesRes.error) throw tablesRes.error;
 
         if (cancelled) return;
 
@@ -459,6 +509,8 @@ export function EventDetailsPage() {
         setVendors((vendorsRes.data as VendorRow[]) ?? []);
         setDocuments((docsRes.data as DocumentRow[]) ?? []);
         setNotes((notesRes.data as NoteRow[]) ?? []);
+        setTeam((teamRes.data as TeamMemberRow[]) ?? []);
+        setTables((tablesRes.data as TableRow[]) ?? []);
       } catch (err: any) {
         if (cancelled) return;
         setErrorMsg(err?.message ?? 'Erro ao carregar dados do evento.');
@@ -995,6 +1047,107 @@ export function EventDetailsPage() {
   }
 
   // --------------------
+  // Team CRUD
+  // --------------------
+  async function addTeamMember() {
+    const { name, phone, address, role } = newTeamMember;
+    if (!name.trim() || !eventId) return;
+
+    try {
+      const res = await supabase
+        .from(T_TEAM)
+        .insert({
+          event_id: eventId,
+          name: name.trim(),
+          phone: phone.trim() || null,
+          address: address.trim() || null,
+          role: role.trim() || 'Cerimonialista',
+        })
+        .select('*')
+        .single();
+
+      if (res.error) throw res.error;
+
+      setTeam((prev) => [...prev, res.data as TeamMemberRow]);
+      setNewTeamMember({ name: '', phone: '', address: '', role: '' });
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao adicionar membro da equipe.');
+    }
+  }
+
+  async function deleteTeamMember(id: string) {
+    try {
+      const res = await supabase.from(T_TEAM).delete().eq('id', id);
+      if (res.error) throw res.error;
+
+      setTeam((prev) => prev.filter((x) => x.id !== id));
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao remover membro da equipe.');
+    }
+  }
+
+  // --------------------
+  // Tables CRUD
+  // --------------------
+  async function addTable() {
+    if (!newTable.name.trim() || !eventId) return;
+    try {
+      const res = await supabase
+        .from(T_TABLES)
+        .insert({
+          event_id: eventId,
+          name: newTable.name,
+          seats: Number(newTable.seats),
+          shape: 'round',
+        })
+        .select('*')
+        .single();
+      if (res.error) throw res.error;
+      setTables((prev) => [...prev, res.data as TableRow]);
+      setNewTable({ name: '', seats: 8 });
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    }
+  }
+
+  async function deleteTable(id: string) {
+    try {
+      // Primeiro, remova os convidados da mesa (set table_id = null)
+      await supabase
+        .from(T_GUESTS)
+        .update({ table_id: null })
+        .eq('table_id', id);
+
+      const res = await supabase.from(T_TABLES).delete().eq('id', id);
+      if (res.error) throw res.error;
+
+      setTables((prev) => prev.filter((t) => t.id !== id));
+      // Atualiza localmente os convidados que estavam nessa mesa
+      setGuests((prev) =>
+        prev.map((g) => (g.table_id === id ? { ...g, table_id: null } : g))
+      );
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    }
+  }
+
+  async function assignGuestToTable(guestId: string, tableId: string | null) {
+    try {
+      const res = await supabase
+        .from(T_GUESTS)
+        .update({ table_id: tableId })
+        .eq('id', guestId);
+      if (res.error) throw res.error;
+
+      setGuests((prev) =>
+        prev.map((g) => (g.id === guestId ? { ...g, table_id: tableId } : g))
+      );
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    }
+  }
+
+  // --------------------
   // UI
   // --------------------
   if (loading) {
@@ -1185,7 +1338,7 @@ export function EventDetailsPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-4 overflow-x-auto">
+        <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
           {(
             [
               'overview',
@@ -1196,6 +1349,9 @@ export function EventDetailsPage() {
               'vendors',
               'documents',
               'notes',
+              'team',
+              'tables',
+              'invites',
             ] as Tab[]
           ).map((t) => (
             <button
@@ -1215,6 +1371,9 @@ export function EventDetailsPage() {
               {t === 'vendors' && 'Fornecedores'}
               {t === 'documents' && 'Documentos'}
               {t === 'notes' && 'Notas'}
+              {t === 'team' && 'Equipe'}
+              {t === 'tables' && 'Mapa de Mesas'}
+              {t === 'invites' && 'Convites'}
             </button>
           ))}
         </div>
@@ -1962,6 +2121,381 @@ export function EventDetailsPage() {
                   Nenhuma nota criada ainda.
                 </p>
               )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'team' && (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <Briefcase className="w-5 h-5 text-purple-500" />
+              Equipe de Cerimonial
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-6 p-4 bg-gray-50 rounded-lg border border-gray-100">
+              <input
+                value={newTeamMember.name}
+                onChange={(e) =>
+                  setNewTeamMember((p) => ({ ...p, name: e.target.value }))
+                }
+                placeholder="Nome completo"
+                className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+              />
+              <input
+                value={newTeamMember.role}
+                onChange={(e) =>
+                  setNewTeamMember((p) => ({ ...p, role: e.target.value }))
+                }
+                placeholder="Função (ex: Recepcionista)"
+                className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+              />
+              <input
+                value={newTeamMember.phone}
+                onChange={(e) =>
+                  setNewTeamMember((p) => ({ ...p, phone: e.target.value }))
+                }
+                placeholder="Telefone / WhatsApp"
+                className="md:col-span-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+              />
+              <input
+                value={newTeamMember.address}
+                onChange={(e) =>
+                  setNewTeamMember((p) => ({ ...p, address: e.target.value }))
+                }
+                placeholder="Endereço"
+                className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+              />
+              <button
+                onClick={addTeamMember}
+                className="md:col-span-1 px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors flex items-center justify-center"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {team.map((member) => (
+                <div
+                  key={member.id}
+                  className="group relative bg-white border border-gray-200 p-5 rounded-xl hover:shadow-md transition-shadow"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 font-bold">
+                        {member.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-gray-800">
+                          {member.name}
+                        </h4>
+                        <span className="text-xs font-medium px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full">
+                          {member.role || 'Membro'}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => deleteTeamMember(member.id)}
+                      className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-2 text-sm text-gray-600">
+                    {member.phone && (
+                      <div className="flex items-center gap-2">
+                        <Phone className="w-4 h-4 text-gray-400" />
+                        <span>{member.phone}</span>
+                      </div>
+                    )}
+                    {member.address && (
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-gray-400" />
+                        <span className="truncate" title={member.address}>
+                          {member.address}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {team.length === 0 && (
+                <div className="col-span-full py-10 text-center text-gray-500 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
+                  <Users className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                  <p>Nenhum membro na equipe ainda.</p>
+                  <p className="text-sm">
+                    Adicione cerimonialistas, recepcionistas e seguranças aqui.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'tables' && (
+          <div className="space-y-6">
+            {/* Criar Mesa */}
+            <div className="bg-white rounded-xl shadow-sm p-6 flex gap-4 items-center">
+              <div className="p-3 bg-indigo-100 rounded-full text-indigo-600">
+                <LayoutGrid className="w-6 h-6" />
+              </div>
+              <input
+                value={newTable.name}
+                onChange={(e) =>
+                  setNewTable((p) => ({ ...p, name: e.target.value }))
+                }
+                placeholder="Nome da Mesa (ex: Família Noiva)"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
+              />
+              <input
+                type="number"
+                value={newTable.seats}
+                onChange={(e) =>
+                  setNewTable((p) => ({ ...p, seats: Number(e.target.value) }))
+                }
+                placeholder="Lugares"
+                className="w-24 px-4 py-2 border border-gray-300 rounded-lg"
+              />
+              <button
+                onClick={addTable}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Coluna: Convidados Sem Mesa */}
+              <div className="bg-white rounded-xl shadow-sm p-6 lg:col-span-1 h-fit">
+                <h3 className="font-bold text-gray-700 mb-4 flex justify-between">
+                  Sem Mesa
+                  <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">
+                    {guests.filter((g) => !g.table_id).length}
+                  </span>
+                </h3>
+                <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                  {guests
+                    .filter((g) => !g.table_id)
+                    .map((guest) => (
+                      <div
+                        key={guest.id}
+                        className="p-3 bg-gray-50 rounded-lg border border-gray-100 flex justify-between items-center group"
+                      >
+                        <span className="text-sm text-gray-700">
+                          {guest.name}
+                        </span>
+                        <div className="relative group-hover:block hidden">
+                          <select
+                            onChange={(e) =>
+                              assignGuestToTable(guest.id, e.target.value)
+                            }
+                            className="text-xs bg-white border border-gray-300 rounded px-1 py-1"
+                            defaultValue=""
+                          >
+                            <option value="" disabled>
+                              Mover para...
+                            </option>
+                            {tables.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ))}
+                  {guests.filter((g) => !g.table_id).length === 0 && (
+                    <p className="text-gray-400 text-sm text-center italic">
+                      Todos sentados! 🎉
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Coluna: Mesas */}
+              <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                {tables.map((table) => {
+                  const tableGuests = guests.filter(
+                    (g) => g.table_id === table.id
+                  );
+                  const isFull = tableGuests.length >= table.seats;
+
+                  return (
+                    <div
+                      key={table.id}
+                      className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
+                    >
+                      <div className="p-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
+                        <div>
+                          <h4 className="font-bold text-gray-800">
+                            {table.name}
+                          </h4>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full ${
+                              isFull
+                                ? 'bg-red-100 text-red-600'
+                                : 'bg-green-100 text-green-600'
+                            }`}
+                          >
+                            {tableGuests.length} / {table.seats} lugares
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => deleteTable(table.id)}
+                          className="text-gray-400 hover:text-red-500"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="p-4 min-h-[100px]">
+                        {tableGuests.length > 0 ? (
+                          <div className="space-y-2">
+                            {tableGuests.map((g) => (
+                              <div
+                                key={g.id}
+                                className="flex justify-between items-center text-sm p-2 hover:bg-gray-50 rounded"
+                              >
+                                <span className="text-gray-700 truncate">
+                                  {g.name}
+                                </span>
+                                <button
+                                  onClick={() => assignGuestToTable(g.id, null)}
+                                  className="text-gray-400 hover:text-red-500"
+                                  title="Remover da mesa"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-center text-gray-400 text-xs py-4">
+                            Mesa vazia
+                          </p>
+                        )}
+
+                        {!isFull && (
+                          <select
+                            onChange={(e) =>
+                              assignGuestToTable(e.target.value, table.id)
+                            }
+                            className="mt-3 w-full text-xs bg-white border border-dashed border-gray-300 rounded px-2 py-2 text-gray-500 hover:border-indigo-400 cursor-pointer"
+                            value=""
+                          >
+                            <option value="" disabled>
+                              + Adicionar convidado...
+                            </option>
+                            {guests
+                              .filter((g) => !g.table_id)
+                              .map((g) => (
+                                <option key={g.id} value={g.id}>
+                                  {g.name}
+                                </option>
+                              ))}
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'invites' && (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
+              <Share2 className="w-5 h-5 text-green-500" />
+              Envio de Convites Digitais
+            </h3>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Configuração da Mensagem */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Modelo da Mensagem (WhatsApp)
+                </label>
+                <div className="p-4 bg-green-50 rounded-lg border border-green-100 text-gray-800 text-sm whitespace-pre-line">
+                  Olá <strong>[Nome do Convidado]</strong>! 👋
+                  <br />
+                  <br />
+                  Você foi convidado(a) com muito carinho para{' '}
+                  <strong>{event.couple || event.name}</strong>!
+                  <br />
+                  <br />
+                  📅 Data:{' '}
+                  {event.event_date
+                    ? new Date(event.event_date).toLocaleDateString('pt-BR')
+                    : 'A definir'}
+                  <br />
+                  📍 Local: {event.location || 'A definir'}
+                  <br />
+                  <br />
+                  Por favor, confirme sua presença respondendo esta mensagem.
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  * Dica: Futuramente teremos um link de confirmação automática
+                  aqui.
+                </p>
+              </div>
+
+              {/* Lista de Envios */}
+              <div>
+                <h4 className="font-bold text-gray-700 mb-4">
+                  Enviar para convidados
+                </h4>
+                <div className="border border-gray-200 rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
+                  {guests.map((guest) => {
+                    // Gera o link do WhatsApp
+                    const message = `Olá ${guest.name}! 👋\n\nVocê foi convidado(a) com muito carinho para ${
+                      event.couple || event.name
+                    }!\n\n📅 Data: ${
+                      event.event_date
+                        ? new Date(event.event_date).toLocaleDateString('pt-BR')
+                        : 'A definir'
+                    }\n📍 Local: ${event.location || 'A definir'}\n\nPor favor, confirme sua presença!`;
+                    const encodedMsg = encodeURIComponent(message);
+                    const phone = guest.phone
+                      ? guest.phone.replace(/\D/g, '')
+                      : '';
+                    const hasPhone = phone.length >= 10;
+
+                    return (
+                      <div
+                        key={guest.id}
+                        className="flex justify-between items-center p-3 border-b last:border-0 hover:bg-gray-50"
+                      >
+                        <div>
+                          <p className="text-gray-800 font-medium">
+                            {guest.name}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {guest.phone || 'Sem telefone'}
+                          </p>
+                        </div>
+
+                        {hasPhone ? (
+                          <a
+                            href={`https://wa.me/55${phone}?text=${encodedMsg}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 px-3 py-1.5 bg-green-500 text-white text-xs font-bold rounded hover:bg-green-600 transition-colors"
+                          >
+                            <MessageCircle className="w-3 h-3" />
+                            Enviar
+                          </a>
+                        ) : (
+                          <span className="text-xs text-gray-400 italic">
+                            Add telefone
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         )}

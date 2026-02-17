@@ -165,6 +165,7 @@ type DocumentRow = {
   file_type?: string | null;
   category?: string | null;
   created_at?: string;
+  vendor_id?: string | null;
 };
 
 type NoteRow = {
@@ -272,6 +273,25 @@ export function EventDetailsPage() {
   const docInputRef = useRef<HTMLInputElement>(null);
 
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+
+  const [isAddingExpense, setIsAddingExpense] = useState(false);
+
+  const [budgetVendorFilterId, setBudgetVendorFilterId] = useState<
+    string | null
+  >(null);
+  function goToBudgetFilteredByVendor(vendorId: string) {
+    setBudgetVendorFilterId(vendorId);
+    setActiveTab('budget');
+  }
+
+  const [documentsVendorFilterId, setDocumentsVendorFilterId] = useState<
+    string | null
+  >(null);
+  function goToDocumentsFilteredByVendor(vendorId: string) {
+    setDocumentsVendorFilterId(vendorId);
+    setActiveTab('documents');
+  }
+
   const [tableViewMode, setTableViewMode] = useState<'list' | 'map'>('list');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
@@ -337,10 +357,15 @@ export function EventDetailsPage() {
   // --------------------
   // Derived
   // --------------------
-  const totalSpent = useMemo(
-    () => expenses.reduce((sum, e) => sum + (Number(e.value) || 0), 0),
-    [expenses]
-  );
+  const expensesForCharts = useMemo(() => {
+    return expenses.filter((e) => (e.status ?? 'pending') !== 'cancelled');
+  }, [expenses]);
+
+  const totalSpent = useMemo(() => {
+    return expenses
+      .filter((e) => (e.status ?? 'pending') !== 'cancelled')
+      .reduce((sum, e) => sum + (Number(e.value) || 0), 0);
+  }, [expenses]);
 
   const budgetTotal = Number(event?.budget_total || 0);
   const budgetProgress =
@@ -749,6 +774,9 @@ export function EventDetailsPage() {
   // Expenses CRUD
   // --------------------
   async function addExpense() {
+    // trava spam de clique
+    if (isAddingExpense) return;
+
     const name = newExpense.name.trim();
 
     const raw = newExpense.value?.toString().trim();
@@ -763,6 +791,9 @@ export function EventDetailsPage() {
       | 'cancelled';
 
     if (!eventId || !name || !Number.isFinite(value) || value < 0) return;
+
+    setIsAddingExpense(true);
+    setErrorMsg(null);
 
     try {
       const color = COLORS[expenses.length % COLORS.length];
@@ -779,6 +810,27 @@ export function EventDetailsPage() {
       setNewExpense({ name: '', value: '', vendor_id: '', status: 'pending' });
     } catch (err: any) {
       setErrorMsg(err?.message ?? 'Erro ao criar despesa.');
+    } finally {
+      setIsAddingExpense(false);
+    }
+  }
+
+  async function updateDocument(
+    docId: string,
+    patch: Partial<Pick<DocumentRow, 'name' | 'category' | 'vendor_id'>>
+  ) {
+    try {
+      const res = await supabase
+        .from(T_DOCUMENTS)
+        .update(patch)
+        .eq('id', docId);
+      if (res.error) throw res.error;
+
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === docId ? { ...d, ...patch } : d))
+      );
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao atualizar documento.');
     }
   }
 
@@ -1415,7 +1467,10 @@ export function EventDetailsPage() {
           ).map((t) => (
             <button
               key={t}
-              onClick={() => setActiveTab(t)}
+              onClick={() => {
+                setActiveTab(t);
+                if (t !== 'budget') setBudgetVendorFilterId(null);
+              }}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                 activeTab === t
                   ? 'bg-white shadow-sm text-pink-600'
@@ -1454,12 +1509,12 @@ export function EventDetailsPage() {
                 </div>
               </div>
 
-              {expenses.length > 0 ? (
+              {expensesForCharts.length > 0 ? (
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={expenses}
+                        data={expensesForCharts}
                         dataKey="value"
                         nameKey="name"
                         cx="50%"
@@ -1467,7 +1522,7 @@ export function EventDetailsPage() {
                         innerRadius={70}
                         outerRadius={100}
                       >
-                        {expenses.map((e, idx) => (
+                        {expensesForCharts.map((e, idx) => (
                           <Cell
                             key={e.id}
                             fill={e.color || COLORS[idx % COLORS.length]}
@@ -1607,6 +1662,10 @@ export function EventDetailsPage() {
             deleteExpense={deleteExpense}
             totalSpent={totalSpent}
             toBRL={toBRL}
+            vendorFilterId={budgetVendorFilterId}
+            onClearVendorFilter={() => setBudgetVendorFilterId(null)}
+            isBusy={isAddingExpense}
+            busyText="Salvando despesa..."
           />
         )}
 
@@ -1640,8 +1699,11 @@ export function EventDetailsPage() {
             onAdd={addVendor}
             vendors={vendors}
             expenses={expenses}
+            documents={documents}
             onStatusChange={updateVendorStatus}
             onDelete={deleteVendor}
+            onGoToVendorExpenses={goToBudgetFilteredByVendor}
+            onGoToVendorDocs={goToDocumentsFilteredByVendor}
           />
         )}
 
@@ -1652,6 +1714,10 @@ export function EventDetailsPage() {
             onPickFile={uploadDocument}
             documents={documents}
             onDelete={deleteDocument}
+            vendors={vendors}
+            onUpdateDocument={updateDocument}
+            vendorFilterId={documentsVendorFilterId}
+            onClearVendorFilter={() => setDocumentsVendorFilterId(null)}
           />
         )}
 

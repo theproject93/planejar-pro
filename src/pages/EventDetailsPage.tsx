@@ -118,6 +118,8 @@ type ExpenseRow = {
   name: string;
   value: number;
   color: string;
+  vendor_id?: string | null;
+  status?: 'pending' | 'confirmed' | 'paid' | 'cancelled';
   created_at?: string;
 };
 
@@ -303,7 +305,12 @@ export function EventDetailsPage() {
   >('normal');
   const [newTaskAssignee, setNewTaskAssignee] = useState('');
 
-  const [newExpense, setNewExpense] = useState({ name: '', value: '' });
+  const [newExpense, setNewExpense] = useState({
+    name: '',
+    value: '',
+    vendor_id: '',
+    status: 'pending' as const,
+  });
   const [newGuest, setNewGuest] = useState({ name: '', phone: '' });
   const [newTimelineItem, setNewTimelineItem] = useState({
     time: '',
@@ -743,21 +750,33 @@ export function EventDetailsPage() {
   // --------------------
   async function addExpense() {
     const name = newExpense.name.trim();
-    const value = Number(newExpense.value);
-    if (!name || !Number.isFinite(value) || !eventId) return;
+
+    const raw = newExpense.value?.toString().trim();
+    const value = raw === '' ? NaN : Number(raw);
+
+    const vendor_id = newExpense.vendor_id ? newExpense.vendor_id : null;
+
+    const status = (newExpense.status ?? 'pending') as
+      | 'pending'
+      | 'confirmed'
+      | 'paid'
+      | 'cancelled';
+
+    if (!eventId || !name || !Number.isFinite(value) || value < 0) return;
 
     try {
       const color = COLORS[expenses.length % COLORS.length];
+
       const res = await supabase
         .from(T_EXPENSES)
-        .insert({ event_id: eventId, name, value, color })
+        .insert({ event_id: eventId, name, value, color, vendor_id, status })
         .select('*')
         .single();
 
       if (res.error) throw res.error;
 
       setExpenses((prev) => [...prev, res.data as ExpenseRow]);
-      setNewExpense({ name: '', value: '' });
+      setNewExpense({ name: '', value: '', vendor_id: '', status: 'pending' });
     } catch (err: any) {
       setErrorMsg(err?.message ?? 'Erro ao criar despesa.');
     }
@@ -765,7 +784,7 @@ export function EventDetailsPage() {
 
   async function updateExpense(
     expenseId: string,
-    patch: Partial<Pick<ExpenseRow, 'name' | 'value'>>
+    patch: Partial<Pick<ExpenseRow, 'name' | 'value' | 'vendor_id' | 'status'>>
   ) {
     try {
       const res = await supabase
@@ -1578,6 +1597,7 @@ export function EventDetailsPage() {
 
         {activeTab === 'budget' && (
           <BudgetTab
+            vendors={vendors}
             expenses={expenses}
             setExpenses={setExpenses}
             newExpense={newExpense}
@@ -1619,6 +1639,7 @@ export function EventDetailsPage() {
             setNewVendor={setNewVendor}
             onAdd={addVendor}
             vendors={vendors}
+            expenses={expenses}
             onStatusChange={updateVendorStatus}
             onDelete={deleteVendor}
           />

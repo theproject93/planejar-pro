@@ -6,12 +6,9 @@ import {
   Clock,
   DollarSign,
   Edit2,
-  GripVertical,
   MapPin,
-  Phone,
   Plus,
   Trash2,
-  Upload,
   Users,
   X,
   CheckSquare,
@@ -19,13 +16,8 @@ import {
   Zap,
   Camera,
   FileText,
-  Briefcase,
   LayoutGrid,
-  MessageCircle,
-  Share2,
-  Download,
   Bell,
-  Mail,
 } from 'lucide-react';
 import {
   PieChart,
@@ -38,7 +30,7 @@ import {
 
 import { supabase } from '../lib/supabaseClient';
 import { TasksTab } from './event-details/tabs/TasksTab';
-import { BudgetTab } from './event-details/tabs/BudgetTab';
+import { BudgetTab, type PaymentMethod } from './event-details/tabs/BudgetTab';
 import { GuestsTab } from './event-details/tabs/GuestsTab';
 import { InvitesTab } from './event-details/tabs/InvitesTab';
 import { TimelineTab } from './event-details/tabs/TimelineTab';
@@ -54,6 +46,7 @@ import { TablesTab } from './event-details/tabs/TablesTab';
 const T_EVENTS = 'events';
 const T_TASKS = 'event_tasks';
 const T_EXPENSES = 'event_expenses';
+const T_PAYMENTS = 'expense_payments'; // ✅ novo
 const T_GUESTS = 'event_guests';
 const T_TIMELINE = 'event_timeline';
 const T_VENDORS = 'event_vendors';
@@ -120,6 +113,17 @@ type ExpenseRow = {
   color: string;
   vendor_id?: string | null;
   status?: 'pending' | 'confirmed' | 'paid' | 'cancelled';
+  created_at?: string;
+};
+
+type PaymentRow = {
+  id: string;
+  event_id: string;
+  expense_id: string;
+  amount: number;
+  method: PaymentMethod;
+  paid_at: string; // YYYY-MM-DD
+  note?: string | null;
   created_at?: string;
 };
 
@@ -196,6 +200,8 @@ type TableRow = {
   note?: string | null;
   pos_x?: number | null;
   pos_y?: number | null;
+  posx?: number | null;
+  posy?: number | null;
   created_at?: string;
 };
 
@@ -250,20 +256,17 @@ const PRIORITY_CONFIG = {
     bg: 'bg-blue-50',
     icon: null,
   },
-  low: { label: 'Baixa', color: 'text-gray-600', bg: 'bg-gray-50', icon: null },
-};
-
-const VENDOR_STATUS = {
-  pending: { label: 'Pendente', color: 'text-gray-600', bg: 'bg-gray-100' },
-  confirmed: { label: 'Confirmado', color: 'text-blue-600', bg: 'bg-blue-100' },
-  paid: { label: 'Pago', color: 'text-green-600', bg: 'bg-green-100' },
-  cancelled: { label: 'Cancelado', color: 'text-red-600', bg: 'bg-red-100' },
+  low: {
+    label: 'Baixa',
+    color: 'text-gray-600',
+    bg: 'bg-gray-50',
+    icon: null,
+  },
 };
 
 // --------------------
-// Visual Map (Mesas)
+// Page
 // --------------------
-
 export function EventDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const eventId = id ?? '';
@@ -274,14 +277,16 @@ export function EventDetailsPage() {
 
   const [activeTab, setActiveTab] = useState<Tab>('overview');
 
-  const [isAddingExpense, setIsAddingExpense] = useState(false);
-
+  // filtro: Fornecedor -> Financeiro
   const [budgetVendorFilterId, setBudgetVendorFilterId] = useState<
     string | null
   >(null);
   function goToBudgetFilteredByVendor(vendorId: string) {
     setBudgetVendorFilterId(vendorId);
     setActiveTab('budget');
+  }
+  function clearBudgetVendorFilter() {
+    setBudgetVendorFilterId(null);
   }
 
   const [documentsVendorFilterId, setDocumentsVendorFilterId] = useState<
@@ -304,6 +309,9 @@ export function EventDetailsPage() {
   const [event, setEvent] = useState<EventRow | null>(null);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
+  const [payments, setPayments] = useState<PaymentRow[]>([]);
+  const [isAddingExpense, setIsAddingExpense] = useState(false);
+
   const [guests, setGuests] = useState<GuestRow[]>([]);
   const [timeline, setTimeline] = useState<TimelineRow[]>([]);
   const [vendors, setVendors] = useState<VendorRow[]>([]);
@@ -331,18 +339,22 @@ export function EventDetailsPage() {
     vendor_id: '',
     status: 'pending' as const,
   });
+
   const [newGuest, setNewGuest] = useState({ name: '', phone: '' });
+
   const [newTimelineItem, setNewTimelineItem] = useState({
     time: '',
     activity: '',
     assignee: '',
   });
+
   const [newVendor, setNewVendor] = useState({
     name: '',
     category: '',
     phone: '',
     email: '',
   });
+
   const [newNote, setNewNote] = useState('');
   const [newTeamMember, setNewTeamMember] = useState({
     name: '',
@@ -350,8 +362,8 @@ export function EventDetailsPage() {
     address: '',
     role: '',
   });
-  const [newTable, setNewTable] = useState({ name: '', seats: 8 });
 
+  const [newTable, setNewTable] = useState({ name: '', seats: 8 });
   const [draggedTaskIndex, setDraggedTaskIndex] = useState<number | null>(null);
 
   // --------------------
@@ -361,11 +373,15 @@ export function EventDetailsPage() {
     return expenses.filter((e) => (e.status ?? 'pending') !== 'cancelled');
   }, [expenses]);
 
-  const totalSpent = useMemo(() => {
-    return expenses
-      .filter((e) => (e.status ?? 'pending') !== 'cancelled')
-      .reduce((sum, e) => sum + (Number(e.value) || 0), 0);
-  }, [expenses]);
+  const totalSpent = useMemo(
+    () =>
+      expenses.reduce((sum, e) => {
+        const st = (e.status ?? 'pending') as ExpenseRow['status'];
+        if (st === 'cancelled') return sum;
+        return sum + (Number(e.value) || 0);
+      }, 0),
+    [expenses]
+  );
 
   const budgetTotal = Number(event?.budget_total || 0);
   const budgetProgress =
@@ -394,7 +410,6 @@ export function EventDetailsPage() {
     return Math.ceil(diff / (1000 * 60 * 60 * 24));
   }, [event?.event_date]);
 
-  // Tarefas pendentes agrupadas
   const pendingTasks = useMemo(
     () => tasks.filter((t) => !t.completed),
     [tasks]
@@ -425,7 +440,7 @@ export function EventDetailsPage() {
 
   // Alertas
   const alerts = useMemo(() => {
-    const list = [];
+    const list: { type: 'error' | 'warning' | 'info'; message: string }[] = [];
     if (overdueTasks.length > 0) {
       list.push({
         type: 'error',
@@ -482,6 +497,7 @@ export function EventDetailsPage() {
           eventRes,
           tasksRes,
           expensesRes,
+          paymentsRes,
           guestsRes,
           timelineRes,
           vendorsRes,
@@ -501,6 +517,11 @@ export function EventDetailsPage() {
             .select('*')
             .eq('event_id', eventId)
             .order('created_at', { ascending: true }),
+          supabase
+            .from(T_PAYMENTS)
+            .select('*')
+            .eq('event_id', eventId)
+            .order('paid_at', { ascending: false }),
           supabase
             .from(T_GUESTS)
             .select('*')
@@ -541,6 +562,7 @@ export function EventDetailsPage() {
         if (eventRes.error) throw eventRes.error;
         if (tasksRes.error) throw tasksRes.error;
         if (expensesRes.error) throw expensesRes.error;
+        if (paymentsRes.error) throw paymentsRes.error;
         if (guestsRes.error) throw guestsRes.error;
         if (timelineRes.error) throw timelineRes.error;
         if (vendorsRes.error) throw vendorsRes.error;
@@ -554,6 +576,7 @@ export function EventDetailsPage() {
         setEvent(eventRes.data as EventRow);
         setTasks((tasksRes.data as TaskRow[]) ?? []);
         setExpenses((expensesRes.data as ExpenseRow[]) ?? []);
+        setPayments((paymentsRes.data as PaymentRow[]) ?? []);
         setGuests((guestsRes.data as GuestRow[]) ?? []);
         setTimeline((timelineRes.data as TimelineRow[]) ?? []);
         setVendors((vendorsRes.data as VendorRow[]) ?? []);
@@ -650,8 +673,9 @@ export function EventDetailsPage() {
   }
 
   // --------------------
-  // Tasks CRUD
+  // Tasks CRUD (mantive o seu)
   // --------------------
+
   async function saveTableNote(tableId: string, note: string | null) {
     const { error } = await supabase
       .from(T_TABLES)
@@ -774,27 +798,17 @@ export function EventDetailsPage() {
   // Expenses CRUD
   // --------------------
   async function addExpense() {
-    // trava spam de clique
     if (isAddingExpense) return;
 
     const name = newExpense.name.trim();
-
     const raw = newExpense.value?.toString().trim();
     const value = raw === '' ? NaN : Number(raw);
-
     const vendor_id = newExpense.vendor_id ? newExpense.vendor_id : null;
-
-    const status = (newExpense.status ?? 'pending') as
-      | 'pending'
-      | 'confirmed'
-      | 'paid'
-      | 'cancelled';
+    const status = (newExpense.status ?? 'pending') as ExpenseRow['status'];
 
     if (!eventId || !name || !Number.isFinite(value) || value < 0) return;
 
     setIsAddingExpense(true);
-    setErrorMsg(null);
-
     try {
       const color = COLORS[expenses.length % COLORS.length];
 
@@ -855,12 +869,67 @@ export function EventDetailsPage() {
 
   async function deleteExpense(expenseId: string) {
     try {
+      // ✅ evita FK (se você não tiver cascade)
+      await supabase.from(T_PAYMENTS).delete().eq('expense_id', expenseId);
+
       const res = await supabase.from(T_EXPENSES).delete().eq('id', expenseId);
       if (res.error) throw res.error;
 
       setExpenses((prev) => prev.filter((e) => e.id !== expenseId));
+      setPayments((prev) => prev.filter((p) => p.expense_id !== expenseId));
     } catch (err: any) {
       setErrorMsg(err?.message ?? 'Erro ao remover despesa.');
+    }
+  }
+
+  // --------------------
+  // Payments CRUD (Opção 1)
+  // --------------------
+  async function addPayment(
+    expenseId: string,
+    payload: {
+      amount: number;
+      method: PaymentMethod;
+      paid_at: string;
+      note?: string | null;
+    }
+  ) {
+    if (!eventId || !expenseId) return;
+
+    const amount = Number(payload.amount);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+
+    try {
+      const res = await supabase
+        .from(T_PAYMENTS)
+        .insert({
+          event_id: eventId,
+          expense_id: expenseId,
+          amount,
+          method: payload.method,
+          paid_at: payload.paid_at,
+          note: payload.note ?? null,
+        })
+        .select('*')
+        .single();
+
+      if (res.error) throw res.error;
+
+      setPayments((prev) => [res.data as PaymentRow, ...prev]);
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao registrar pagamento.');
+    }
+  }
+
+  async function deletePayment(paymentId: string) {
+    if (!paymentId) return;
+    try {
+      const res = await supabase.from(T_PAYMENTS).delete().eq('id', paymentId);
+      if (res.error) throw res.error;
+
+      setPayments((prev) => prev.filter((p) => p.id !== paymentId));
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao remover pagamento.');
     }
   }
 
@@ -1257,9 +1326,8 @@ export function EventDetailsPage() {
       setErrorMsg(err.message);
     }
   }
-
   // --------------------
-  // UI
+  // UI (trechos relevantes)
   // --------------------
   if (loading) {
     return (
@@ -1329,7 +1397,6 @@ export function EventDetailsPage() {
                 }}
               />
             </div>
-
             <div>
               <h1 className="text-2xl font-bold text-gray-800">
                 {displayName}
@@ -1650,22 +1717,40 @@ export function EventDetailsPage() {
           />
         )}
 
+        {/* ✅ AQUI está o essencial: Budget/Vendors com props novas */}
         {activeTab === 'budget' && (
           <BudgetTab
             vendors={vendors}
             expenses={expenses}
             setExpenses={setExpenses}
+            payments={payments}
             newExpense={newExpense}
             setNewExpense={setNewExpense}
             addExpense={addExpense}
             updateExpense={updateExpense}
             deleteExpense={deleteExpense}
+            addPayment={addPayment}
+            deletePayment={deletePayment}
             totalSpent={totalSpent}
             toBRL={toBRL}
             vendorFilterId={budgetVendorFilterId}
-            onClearVendorFilter={() => setBudgetVendorFilterId(null)}
+            onClearVendorFilter={clearBudgetVendorFilter}
             isBusy={isAddingExpense}
-            busyText="Salvando despesa..."
+            busyText="Salvando no Supabase…"
+          />
+        )}
+
+        {activeTab === 'vendors' && (
+          <VendorsTab
+            newVendor={newVendor}
+            setNewVendor={setNewVendor}
+            onAdd={async () => {}}
+            vendors={vendors}
+            expenses={expenses}
+            payments={payments}
+            onStatusChange={async () => {}}
+            onDelete={async () => {}}
+            onGoToVendorExpenses={goToBudgetFilteredByVendor}
           />
         )}
 
@@ -1689,21 +1774,6 @@ export function EventDetailsPage() {
             onAdd={addTimelineItem}
             timeline={timeline}
             onDelete={deleteTimelineItem}
-          />
-        )}
-
-        {activeTab === 'vendors' && (
-          <VendorsTab
-            newVendor={newVendor}
-            setNewVendor={setNewVendor}
-            onAdd={addVendor}
-            vendors={vendors}
-            expenses={expenses}
-            documents={documents}
-            onStatusChange={updateVendorStatus}
-            onDelete={deleteVendor}
-            onGoToVendorExpenses={goToBudgetFilteredByVendor}
-            onGoToVendorDocs={goToDocumentsFilteredByVendor}
           />
         )}
 

@@ -1,16 +1,44 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Trash2, X, AlertTriangle } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  X,
+  AlertTriangle,
+  CreditCard,
+  Banknote,
+  Receipt,
+  Link2,
+} from 'lucide-react';
 
 export type ExpenseStatus = 'pending' | 'confirmed' | 'paid' | 'cancelled';
+
+export type PaymentMethod =
+  | 'pix'
+  | 'dinheiro'
+  | 'debito'
+  | 'credito'
+  | 'boleto'
+  | 'transferencia'
+  | 'outro';
 
 const STATUS_UI: Record<
   ExpenseStatus,
   { label: string; color: string; bg: string }
 > = {
   pending: { label: 'Pendente', color: 'text-amber-700', bg: 'bg-amber-100' },
-  confirmed: { label: 'Confirmado', color: 'text-blue-600', bg: 'bg-blue-100' },
+  confirmed: { label: 'Parcial', color: 'text-blue-600', bg: 'bg-blue-100' },
   paid: { label: 'Pago', color: 'text-green-600', bg: 'bg-green-100' },
   cancelled: { label: 'Cancelado', color: 'text-red-600', bg: 'bg-red-100' },
+};
+
+const METHOD_UI: Record<PaymentMethod, { label: string }> = {
+  pix: { label: 'Pix' },
+  dinheiro: { label: 'Dinheiro' },
+  debito: { label: 'Débito' },
+  credito: { label: 'Crédito' },
+  boleto: { label: 'Boleto' },
+  transferencia: { label: 'Transferência' },
+  outro: { label: 'Outro' },
 };
 
 type VendorBase = {
@@ -25,25 +53,44 @@ type ExpenseBase = {
   value: number;
   color: string;
   vendor_id?: string | null;
-  status?: ExpenseStatus;
+  status?: ExpenseStatus; // aqui, usado só p/ "cancelled" na Opção 1
 };
 
 type NewExpenseBase = {
   name: string;
   value: string;
   vendor_id?: string;
-  status?: ExpenseStatus;
+  status?: ExpenseStatus; // compatibilidade com seu estado atual (vamos ignorar ao criar)
+};
+
+type PaymentBase = {
+  id: string;
+  expense_id: string;
+  amount: number;
+  method: PaymentMethod;
+  paid_at: string; // YYYY-MM-DD
+  note?: string | null;
+};
+
+type AddPaymentPayload = {
+  amount: number;
+  method: PaymentMethod;
+  paid_at: string;
+  note?: string | null;
 };
 
 type Props<
   TExpense extends ExpenseBase,
   TNewExpense extends NewExpenseBase,
   TVendor extends VendorBase,
+  TPayment extends PaymentBase,
 > = {
   vendors: TVendor[];
 
   expenses: TExpense[];
   setExpenses: React.Dispatch<React.SetStateAction<TExpense[]>>;
+
+  payments: TPayment[];
 
   newExpense: TNewExpense;
   setNewExpense: React.Dispatch<React.SetStateAction<TNewExpense>>;
@@ -60,11 +107,16 @@ type Props<
   ) => void | Promise<void>;
   deleteExpense: (expenseId: string) => void | Promise<void>;
 
-  // total global (idealmente já excluindo canceladas no EventDetailsPage)
+  addPayment: (
+    expenseId: string,
+    payload: AddPaymentPayload
+  ) => void | Promise<void>;
+  deletePayment: (paymentId: string) => void | Promise<void>;
+
   totalSpent: number;
   toBRL: (value: number) => string;
 
-  // integração
+  // integração: filtro vindo da aba Fornecedores
   vendorFilterId?: string | null;
   onClearVendorFilter?: () => void;
 
@@ -148,117 +200,267 @@ function ConfirmDialog({
   );
 }
 
+function todayISO() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function deriveExpenseStatus(
+  storedStatus: ExpenseStatus | undefined,
+  paidSum: number,
+  value: number
+): ExpenseStatus {
+  if (storedStatus === 'cancelled') return 'cancelled';
+  if (value > 0 && paidSum >= value) return 'paid';
+  if (paidSum > 0) return 'confirmed';
+  return 'pending';
+}
+
+function PaymentMethodIcon({ method }: { method: PaymentMethod }) {
+  if (method === 'dinheiro') return <Banknote className="w-3 h-3" />;
+  if (method === 'boleto') return <Receipt className="w-3 h-3" />;
+  if (method === 'credito' || method === 'debito')
+    return <CreditCard className="w-3 h-3" />;
+  if (method === 'transferencia') return <Link2 className="w-3 h-3" />;
+  return null;
+}
+
 export function BudgetTab<
   TExpense extends ExpenseBase,
   TNewExpense extends NewExpenseBase,
   TVendor extends VendorBase,
+  TPayment extends PaymentBase,
 >({
   vendors,
   expenses,
   setExpenses,
+  payments,
   newExpense,
   setNewExpense,
   addExpense,
   updateExpense,
   deleteExpense,
+  addPayment,
+  deletePayment,
   totalSpent,
   toBRL,
-  vendorFilterId = null,
+  vendorFilterId,
   onClearVendorFilter,
   isBusy = false,
-  busyText = 'Salvando…',
-}: Props<TExpense, TNewExpense, TVendor>) {
+  busyText = 'Aguarde…',
+}: Props<TExpense, TNewExpense, TVendor, TPayment>) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<{
     id: string;
     name: string;
   } | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
 
-  const vendorName = useMemo(() => {
-    if (!vendorFilterId) return null;
-    return vendors.find((v) => v.id === vendorFilterId)?.name ?? null;
-  }, [vendorFilterId, vendors]);
+  const [confirmPaymentOpen, setConfirmPaymentOpen] = useState(false);
+  const [confirmPaymentTarget, setConfirmPaymentTarget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+
+  const [isDeletingExpense, setIsDeletingExpense] = useState(false);
+  const [isAddingExpense, setIsAddingExpense] = useState(false);
+
+  const [isAddingPaymentFor, setIsAddingPaymentFor] = useState<string | null>(
+    null
+  );
+  const [isDeletingPayment, setIsDeletingPayment] = useState(false);
+
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [paymentDraft, setPaymentDraft] = useState<
+    Record<string, AddPaymentPayload>
+  >({});
+
+  const paidByExpenseId = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of payments) {
+      m.set(p.expense_id, (m.get(p.expense_id) ?? 0) + Number(p.amount || 0));
+    }
+    return m;
+  }, [payments]);
+
+  const paymentsByExpenseId = useMemo(() => {
+    const m = new Map<string, TPayment[]>();
+    for (const p of payments) {
+      const arr = m.get(p.expense_id) ?? [];
+      arr.push(p);
+      m.set(p.expense_id, arr);
+    }
+    for (const [k, arr] of m.entries()) {
+      arr.sort((a, b) =>
+        String(b.paid_at || '').localeCompare(String(a.paid_at || ''))
+      );
+      m.set(k, arr);
+    }
+    return m;
+  }, [payments]);
 
   const visibleExpenses = useMemo(() => {
-    if (!vendorFilterId) return expenses;
-    return expenses.filter((e) => (e.vendor_id ?? null) === vendorFilterId);
+    return vendorFilterId
+      ? expenses.filter((e) => (e.vendor_id ?? null) === vendorFilterId)
+      : expenses;
   }, [expenses, vendorFilterId]);
 
   const visibleSubtotalNonCancelled = useMemo(() => {
-    return visibleExpenses
-      .filter((e) => (e.status ?? 'pending') !== 'cancelled')
-      .reduce((sum, e) => sum + Number(e.value || 0), 0);
+    return visibleExpenses.reduce((sum, e) => {
+      const st = (e.status ?? 'pending') as ExpenseStatus;
+      if (st === 'cancelled') return sum;
+      return sum + Number(e.value || 0);
+    }, 0);
   }, [visibleExpenses]);
 
-  const blocking = isBusy || isDeleting;
+  const blocking =
+    isBusy ||
+    isDeletingExpense ||
+    isAddingExpense ||
+    isDeletingPayment ||
+    isAddingPaymentFor !== null;
 
-  async function confirmDelete() {
+  function getDraft(expenseId: string): AddPaymentPayload {
+    return (
+      paymentDraft[expenseId] ?? {
+        amount: 0,
+        method: 'pix',
+        paid_at: todayISO(),
+        note: '',
+      }
+    );
+  }
+
+  async function addExpenseSafe() {
+    if (blocking) return;
+    try {
+      setIsAddingExpense(true);
+      await addExpense();
+    } finally {
+      setIsAddingExpense(false);
+    }
+  }
+
+  async function confirmDeleteExpense() {
     if (!confirmTarget) return;
     try {
-      setIsDeleting(true);
+      setIsDeletingExpense(true);
       await deleteExpense(confirmTarget.id);
       setConfirmOpen(false);
       setConfirmTarget(null);
     } finally {
-      setIsDeleting(false);
+      setIsDeletingExpense(false);
+    }
+  }
+
+  async function addPaymentSafe(expenseId: string) {
+    if (blocking) return;
+
+    const d = getDraft(expenseId);
+    const amount = Number(d.amount);
+
+    if (!Number.isFinite(amount) || amount <= 0) return;
+
+    try {
+      setIsAddingPaymentFor(expenseId);
+      await addPayment(expenseId, {
+        amount,
+        method: d.method,
+        paid_at: d.paid_at || todayISO(),
+        note: (d.note ?? '').trim() || null,
+      });
+
+      setPaymentDraft((prev) => ({
+        ...prev,
+        [expenseId]: {
+          amount: 0,
+          method: d.method,
+          paid_at: d.paid_at || todayISO(),
+          note: '',
+        },
+      }));
+    } finally {
+      setIsAddingPaymentFor(null);
+    }
+  }
+
+  async function confirmDeletePayment() {
+    if (!confirmPaymentTarget) return;
+    try {
+      setIsDeletingPayment(true);
+      await deletePayment(confirmPaymentTarget.id);
+      setConfirmPaymentOpen(false);
+      setConfirmPaymentTarget(null);
+    } finally {
+      setIsDeletingPayment(false);
     }
   }
 
   return (
     <div className="bg-white rounded-xl shadow-sm p-6 relative">
-      {/* Overlay de bloqueio */}
       {blocking && (
         <div className="absolute inset-0 z-40 bg-white/60 backdrop-blur-[1px] rounded-xl flex items-center justify-center">
           <div className="px-4 py-3 bg-white border border-gray-200 rounded-lg shadow-sm text-sm text-gray-700">
-            {isDeleting ? 'Excluindo…' : busyText}
+            {isDeletingExpense
+              ? 'Excluindo…'
+              : isAddingExpense
+                ? 'Salvando…'
+                : isDeletingPayment
+                  ? 'Excluindo pagamento…'
+                  : isAddingPaymentFor
+                    ? 'Salvando pagamento…'
+                    : busyText}
           </div>
         </div>
       )}
 
-      {/* Chip de filtro por fornecedor */}
-      {vendorFilterId && (
-        <div className="mb-4 flex items-center justify-between gap-3 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg px-3 py-2 text-sm">
-          <span className="truncate">
-            Filtrando por fornecedor: <b>{vendorName ?? '—'}</b>
-          </span>
-
-          {onClearVendorFilter && (
-            <button
-              onClick={onClearVendorFilter}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-indigo-100 transition"
-              title="Limpar filtro"
-              type="button"
-              disabled={blocking}
-            >
-              <X className="w-4 h-4" />
-              Limpar
-            </button>
-          )}
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div>
+          <h3 className="text-lg font-bold text-gray-800">Despesas</h3>
+          <p className="text-xs text-gray-500">
+            Status é calculado pelos <b>pagamentos</b>. Você só marca
+            manualmente quando <b>cancelar</b>.
+          </p>
         </div>
-      )}
 
-      {/* Form */}
+        {vendorFilterId && onClearVendorFilter && (
+          <button
+            type="button"
+            onClick={onClearVendorFilter}
+            disabled={blocking}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 disabled:opacity-60"
+            title="Limpar filtro do fornecedor"
+          >
+            <X className="w-4 h-4" />
+            Limpar filtro
+          </button>
+        )}
+      </div>
+
+      {/* Form adicionar despesa */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-4">
         <input
           value={newExpense.name}
           onChange={(e) =>
             setNewExpense((p) => ({ ...p, name: e.target.value }))
           }
-          placeholder="Categoria (ex: Buffet)"
+          placeholder="Categoria (ex: DJ, Buffet, Foto)"
           className="md:col-span-4 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') addExpense();
-          }}
           disabled={blocking}
         />
 
         <select
           value={newExpense.vendor_id ?? ''}
           onChange={(e) =>
-            setNewExpense((p) => ({ ...p, vendor_id: e.target.value || '' }))
+            setNewExpense((p) => ({ ...p, vendor_id: e.target.value }))
           }
-          className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+          className="md:col-span-4 px-4 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-pink-500 focus:border-transparent"
           title="Fornecedor (opcional)"
           disabled={blocking}
         >
@@ -270,24 +472,6 @@ export function BudgetTab<
           ))}
         </select>
 
-        <select
-          value={(newExpense.status ?? 'pending') as ExpenseStatus}
-          onChange={(e) =>
-            setNewExpense((p) => ({
-              ...p,
-              status: e.target.value as ExpenseStatus,
-            }))
-          }
-          className="md:col-span-2 px-4 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-          title="Status"
-          disabled={blocking}
-        >
-          <option value="pending">Pendente</option>
-          <option value="confirmed">Confirmado</option>
-          <option value="paid">Pago</option>
-          <option value="cancelled">Cancelado</option>
-        </select>
-
         <input
           value={newExpense.value}
           onChange={(e) =>
@@ -295,15 +479,15 @@ export function BudgetTab<
           }
           placeholder="Valor"
           type="number"
-          className="md:col-span-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+          className="md:col-span-3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
           onKeyDown={(e) => {
-            if (e.key === 'Enter') addExpense();
+            if (e.key === 'Enter') addExpenseSafe();
           }}
           disabled={blocking}
         />
 
         <button
-          onClick={() => addExpense()}
+          onClick={addExpenseSafe}
           disabled={blocking}
           className={`md:col-span-1 px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors ${
             blocking ? 'opacity-60 cursor-not-allowed' : ''
@@ -323,158 +507,416 @@ export function BudgetTab<
               <th className="text-left py-2 px-3 text-gray-700">Fornecedor</th>
               <th className="text-left py-2 px-3 text-gray-700">Status</th>
               <th className="text-right py-2 px-3 text-gray-700">Valor</th>
-              <th className="w-16" />
+              <th className="text-right py-2 px-3 text-gray-700">Pago</th>
+              <th className="w-24" />
             </tr>
           </thead>
 
           <tbody>
             {visibleExpenses.map((e) => {
-              const status = (e.status ?? 'pending') as ExpenseStatus;
-              const isCancelled = status === 'cancelled';
+              const storedStatus = (e.status ?? 'pending') as ExpenseStatus;
+              const isCancelled = storedStatus === 'cancelled';
+
+              const paid = paidByExpenseId.get(e.id) ?? 0;
+              const value = Number(e.value || 0);
+              const derived = deriveExpenseStatus(storedStatus, paid, value);
+
+              const remaining = clamp(value - paid, 0, value);
+
+              const vendorName =
+                e.vendor_id && vendors.find((v) => v.id === e.vendor_id)
+                  ? vendors.find((v) => v.id === e.vendor_id)!.name
+                  : null;
+
+              const isExpanded = !!expanded[e.id];
+              const pList = paymentsByExpenseId.get(e.id) ?? [];
 
               return (
-                <tr
-                  key={e.id}
-                  className={`border-b ${isCancelled ? 'opacity-60' : ''}`}
-                >
-                  <td className="py-2 px-3">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="w-3 h-3 rounded"
-                        style={{ backgroundColor: e.color }}
-                      />
+                <React.Fragment key={e.id}>
+                  <tr className={`border-b ${isCancelled ? 'opacity-60' : ''}`}>
+                    <td className="py-2 px-3 align-top">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-3 h-3 rounded"
+                          style={{ backgroundColor: e.color }}
+                        />
 
+                        <input
+                          value={e.name}
+                          onChange={(ev) =>
+                            setExpenses((prev) =>
+                              prev.map((x) =>
+                                x.id === e.id
+                                  ? ({
+                                      ...x,
+                                      name: ev.target.value,
+                                    } as TExpense)
+                                  : x
+                              )
+                            )
+                          }
+                          onBlur={(ev) =>
+                            updateExpense(e.id, {
+                              name: ev.target.value.trim(),
+                            })
+                          }
+                          className={`w-full bg-transparent focus:outline-none ${
+                            isCancelled ? 'line-through text-gray-600' : ''
+                          }`}
+                          disabled={blocking}
+                        />
+                      </div>
+
+                      {vendorName && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          <span className="inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
+                            {vendorName}
+                          </span>
+                        </div>
+                      )}
+                    </td>
+
+                    <td className="py-2 px-3 align-top">
+                      <select
+                        value={e.vendor_id ?? ''}
+                        onChange={(ev) => {
+                          const vendor_id = ev.target.value || null;
+
+                          setExpenses((prev) =>
+                            prev.map((x) =>
+                              x.id === e.id
+                                ? ({ ...x, vendor_id } as TExpense)
+                                : x
+                            )
+                          );
+
+                          updateExpense(e.id, { vendor_id });
+                        }}
+                        className="w-full px-3 py-1.5 border border-gray-200 rounded-lg bg-white text-sm"
+                        title="Fornecedor"
+                        disabled={blocking}
+                      >
+                        <option value="">—</option>
+                        {vendors.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name} • {v.category}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    <td className="py-2 px-3 align-top">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium ${STATUS_UI[derived].bg} ${STATUS_UI[derived].color}`}
+                          title="Derivado pelos pagamentos (cancelamento é manual)"
+                        >
+                          {STATUS_UI[derived].label}
+                        </span>
+
+                        <select
+                          value={isCancelled ? 'cancelled' : 'active'}
+                          onChange={(ev) => {
+                            const v = ev.target.value;
+                            const next =
+                              v === 'cancelled'
+                                ? ('cancelled' as ExpenseStatus)
+                                : ('pending' as ExpenseStatus);
+
+                            setExpenses((prev) =>
+                              prev.map((x) =>
+                                x.id === e.id
+                                  ? ({ ...x, status: next } as TExpense)
+                                  : x
+                              )
+                            );
+
+                            updateExpense(e.id, { status: next });
+                          }}
+                          disabled={blocking}
+                          className="px-2 py-1.5 border border-gray-200 rounded-lg bg-white text-sm"
+                          title="Ativar / cancelar despesa"
+                        >
+                          <option value="active">Ativa</option>
+                          <option value="cancelled">Cancelada</option>
+                        </select>
+                      </div>
+                    </td>
+
+                    <td className="py-2 px-3 text-right align-top">
                       <input
-                        value={e.name}
+                        value={e.value}
+                        type="number"
                         onChange={(ev) =>
                           setExpenses((prev) =>
                             prev.map((x) =>
                               x.id === e.id
-                                ? ({ ...x, name: ev.target.value } as TExpense)
+                                ? ({
+                                    ...x,
+                                    value: Number(ev.target.value),
+                                  } as TExpense)
                                 : x
                             )
                           )
                         }
                         onBlur={(ev) =>
-                          updateExpense(e.id, { name: ev.target.value.trim() })
+                          updateExpense(e.id, {
+                            value: Number(ev.target.value) || 0,
+                          })
                         }
-                        className={`w-full bg-transparent focus:outline-none ${
-                          isCancelled ? 'line-through text-gray-600' : ''
+                        className={`w-40 text-right bg-transparent focus:outline-none ${
+                          isCancelled ? 'text-gray-600' : ''
                         }`}
                         disabled={blocking}
                       />
-                    </div>
-                  </td>
+                    </td>
 
-                  <td className="py-2 px-3">
-                    <select
-                      value={e.vendor_id ?? ''}
-                      onChange={(ev) => {
-                        const vendor_id = ev.target.value || null;
+                    <td className="py-2 px-3 text-right align-top">
+                      <div className="text-sm font-medium text-gray-800">
+                        {toBRL(paid)}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {isCancelled ? '—' : `aberto: ${toBRL(remaining)}`}
+                      </div>
+                    </td>
 
-                        setExpenses((prev) =>
-                          prev.map((x) =>
-                            x.id === e.id
-                              ? ({ ...x, vendor_id } as TExpense)
-                              : x
-                          )
-                        );
+                    <td className="py-2 px-3 text-right align-top">
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpanded((p) => ({ ...p, [e.id]: !p[e.id] }))
+                          }
+                          disabled={blocking}
+                          className={`px-2 py-1 rounded-lg text-xs border ${
+                            isExpanded
+                              ? 'bg-gray-900 text-white border-gray-900'
+                              : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                          } ${blocking ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          title="Ver / adicionar pagamentos"
+                        >
+                          Pagamentos
+                        </button>
 
-                        updateExpense(e.id, { vendor_id });
-                      }}
-                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg bg-white text-sm"
-                      title="Fornecedor"
-                      disabled={blocking}
-                    >
-                      <option value="">—</option>
-                      {vendors.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.name} • {v.category}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
+                        <button
+                          onClick={() => {
+                            setConfirmTarget({ id: e.id, name: e.name });
+                            setConfirmOpen(true);
+                          }}
+                          disabled={blocking}
+                          className={`p-1 text-red-600 hover:bg-red-50 rounded ${
+                            blocking ? 'opacity-60 cursor-not-allowed' : ''
+                          }`}
+                          title="Remover despesa"
+                          type="button"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
 
-                  <td className="py-2 px-3">
-                    <select
-                      value={status}
-                      onChange={(ev) => {
-                        const st = ev.target.value as ExpenseStatus;
+                  {isExpanded && (
+                    <tr className="border-b bg-gray-50/60">
+                      <td colSpan={6} className="px-3 py-3">
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
+                          <div className="lg:col-span-3">
+                            <label className="block text-xs text-gray-600 mb-1">
+                              Valor pago
+                            </label>
+                            <input
+                              type="number"
+                              value={getDraft(e.id).amount || ''}
+                              onChange={(ev) =>
+                                setPaymentDraft((prev) => ({
+                                  ...prev,
+                                  [e.id]: {
+                                    ...getDraft(e.id),
+                                    amount: Number(ev.target.value),
+                                  },
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm"
+                              placeholder="Ex: 500"
+                              disabled={blocking || isCancelled}
+                            />
+                          </div>
 
-                        setExpenses((prev) =>
-                          prev.map((x) =>
-                            x.id === e.id
-                              ? ({ ...x, status: st } as TExpense)
-                              : x
-                          )
-                        );
+                          <div className="lg:col-span-3">
+                            <label className="block text-xs text-gray-600 mb-1">
+                              Método
+                            </label>
+                            <select
+                              value={getDraft(e.id).method}
+                              onChange={(ev) =>
+                                setPaymentDraft((prev) => ({
+                                  ...prev,
+                                  [e.id]: {
+                                    ...getDraft(e.id),
+                                    method: ev.target.value as PaymentMethod,
+                                  },
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm"
+                              disabled={blocking || isCancelled}
+                            >
+                              {Object.keys(METHOD_UI).map((k) => (
+                                <option key={k} value={k}>
+                                  {METHOD_UI[k as PaymentMethod].label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
 
-                        updateExpense(e.id, { status: st });
-                      }}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium ${STATUS_UI[status].bg} ${
-                        STATUS_UI[status].color
-                      }`}
-                      title="Status"
-                      disabled={blocking}
-                    >
-                      <option value="pending">Pendente</option>
-                      <option value="confirmed">Confirmado</option>
-                      <option value="paid">Pago</option>
-                      <option value="cancelled">Cancelado</option>
-                    </select>
-                  </td>
+                          <div className="lg:col-span-3">
+                            <label className="block text-xs text-gray-600 mb-1">
+                              Data
+                            </label>
+                            <input
+                              type="date"
+                              value={getDraft(e.id).paid_at}
+                              onChange={(ev) =>
+                                setPaymentDraft((prev) => ({
+                                  ...prev,
+                                  [e.id]: {
+                                    ...getDraft(e.id),
+                                    paid_at: ev.target.value,
+                                  },
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm"
+                              disabled={blocking || isCancelled}
+                            />
+                          </div>
 
-                  <td className="py-2 px-3 text-right">
-                    <input
-                      value={e.value}
-                      type="number"
-                      onChange={(ev) =>
-                        setExpenses((prev) =>
-                          prev.map((x) =>
-                            x.id === e.id
-                              ? ({
-                                  ...x,
-                                  value: Number(ev.target.value),
-                                } as TExpense)
-                              : x
-                          )
-                        )
-                      }
-                      onBlur={(ev) =>
-                        updateExpense(e.id, {
-                          value: Number(ev.target.value) || 0,
-                        })
-                      }
-                      className={`w-40 text-right bg-transparent focus:outline-none ${
-                        isCancelled ? 'text-gray-600' : ''
-                      }`}
-                      disabled={blocking}
-                    />
-                  </td>
+                          <div className="lg:col-span-2">
+                            <button
+                              type="button"
+                              onClick={() => addPaymentSafe(e.id)}
+                              disabled={blocking || isCancelled}
+                              className={`w-full px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white ${
+                                blocking || isCancelled
+                                  ? 'opacity-60 cursor-not-allowed'
+                                  : ''
+                              }`}
+                              title={
+                                isCancelled
+                                  ? 'Despesa cancelada não recebe pagamentos'
+                                  : 'Adicionar pagamento'
+                              }
+                            >
+                              Adicionar
+                            </button>
+                          </div>
 
-                  <td className="py-2 px-3 text-right">
-                    <button
-                      onClick={() => {
-                        setConfirmTarget({ id: e.id, name: e.name });
-                        setConfirmOpen(true);
-                      }}
-                      disabled={blocking}
-                      className={`p-1 text-red-600 hover:bg-red-50 rounded ${
-                        blocking ? 'opacity-60 cursor-not-allowed' : ''
-                      }`}
-                      title="Remover despesa"
-                      type="button"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
+                          <div className="lg:col-span-12">
+                            <label className="block text-xs text-gray-600 mb-1">
+                              Observação (opcional)
+                            </label>
+                            <input
+                              value={getDraft(e.id).note ?? ''}
+                              onChange={(ev) =>
+                                setPaymentDraft((prev) => ({
+                                  ...prev,
+                                  [e.id]: {
+                                    ...getDraft(e.id),
+                                    note: ev.target.value,
+                                  },
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm"
+                              placeholder="Ex: sinal / entrada / 2ª parcela"
+                              disabled={blocking || isCancelled}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-3">
+                          {pList.length === 0 ? (
+                            <p className="text-sm text-gray-600">
+                              Nenhum pagamento registrado ainda.
+                            </p>
+                          ) : (
+                            <div className="space-y-2">
+                              {pList.map((p) => (
+                                <div
+                                  key={p.id}
+                                  className="flex items-center gap-3 p-3 rounded-lg bg-white border border-gray-200"
+                                >
+                                  <div className="text-sm font-semibold text-gray-900">
+                                    {toBRL(Number(p.amount || 0))}
+                                  </div>
+
+                                  <span className="text-xs text-gray-500">
+                                    •
+                                  </span>
+
+                                  <div className="text-sm text-gray-700">
+                                    {p.paid_at}
+                                  </div>
+
+                                  <span className="text-xs text-gray-500">
+                                    •
+                                  </span>
+
+                                  <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">
+                                    <PaymentMethodIcon method={p.method} />
+                                    {METHOD_UI[p.method].label}
+                                  </span>
+
+                                  {p.note ? (
+                                    <>
+                                      <span className="text-xs text-gray-500">
+                                        •
+                                      </span>
+                                      <div
+                                        className="text-sm text-gray-600 truncate max-w-[420px]"
+                                        title={p.note}
+                                      >
+                                        {p.note}
+                                      </div>
+                                    </>
+                                  ) : null}
+
+                                  <div className="flex-1" />
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfirmPaymentTarget({
+                                        id: p.id,
+                                        title: `${toBRL(Number(p.amount || 0))} • ${
+                                          METHOD_UI[p.method].label
+                                        } • ${p.paid_at}`,
+                                      });
+                                      setConfirmPaymentOpen(true);
+                                    }}
+                                    disabled={blocking}
+                                    className={`p-1 text-red-600 hover:bg-red-50 rounded ${
+                                      blocking
+                                        ? 'opacity-60 cursor-not-allowed'
+                                        : ''
+                                    }`}
+                                    title="Remover pagamento"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
 
             {visibleExpenses.length === 0 && (
               <tr>
-                <td colSpan={5} className="py-6 text-gray-600 text-center">
+                <td colSpan={6} className="py-6 text-gray-600 text-center">
                   Nenhuma despesa encontrada.
                 </td>
               </tr>
@@ -493,6 +935,7 @@ export function BudgetTab<
                   {toBRL(visibleSubtotalNonCancelled)}
                 </td>
                 <td />
+                <td />
               </tr>
             )}
 
@@ -504,11 +947,13 @@ export function BudgetTab<
                 {toBRL(totalSpent)}
               </td>
               <td />
+              <td />
             </tr>
 
             <tr>
-              <td colSpan={5} className="pt-2 px-3 text-xs text-gray-500">
-                * Despesas <b>canceladas</b> não devem contar como gasto.
+              <td colSpan={6} className="pt-2 px-3 text-xs text-gray-500">
+                * Despesas <b>canceladas</b> não contam como gasto. Status{' '}
+                <b>Parcial/Pago</b> é derivado dos pagamentos.
               </td>
             </tr>
           </tfoot>
@@ -526,13 +971,33 @@ export function BudgetTab<
         confirmText="Excluir"
         cancelText="Cancelar"
         tone="danger"
-        loading={isDeleting}
+        loading={isDeletingExpense}
         onClose={() => {
-          if (isDeleting) return;
+          if (isDeletingExpense) return;
           setConfirmOpen(false);
           setConfirmTarget(null);
         }}
-        onConfirm={confirmDelete}
+        onConfirm={confirmDeleteExpense}
+      />
+
+      <ConfirmDialog
+        open={confirmPaymentOpen}
+        title="Excluir pagamento?"
+        description={
+          confirmPaymentTarget
+            ? `Remover este pagamento: ${confirmPaymentTarget.title}?`
+            : undefined
+        }
+        confirmText="Excluir"
+        cancelText="Cancelar"
+        tone="danger"
+        loading={isDeletingPayment}
+        onClose={() => {
+          if (isDeletingPayment) return;
+          setConfirmPaymentOpen(false);
+          setConfirmPaymentTarget(null);
+        }}
+        onConfirm={confirmDeletePayment}
       />
     </div>
   );

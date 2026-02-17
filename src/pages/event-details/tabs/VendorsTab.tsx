@@ -1,13 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import {
-  Mail,
-  Phone,
-  Plus,
-  Trash2,
-  Link2,
-  AlertTriangle,
-  FileText,
-} from 'lucide-react';
+import { Mail, Phone, Plus, Trash2, Link2, AlertTriangle } from 'lucide-react';
 import type { ExpenseStatus } from './BudgetTab';
 
 type VendorStatus = 'pending' | 'confirmed' | 'paid' | 'cancelled';
@@ -35,12 +27,13 @@ type ExpenseBase = {
   id: string;
   vendor_id?: string | null;
   value: number;
-  status?: ExpenseStatus;
+  status?: ExpenseStatus; // aqui, usado só p/ cancelled na Opção 1
 };
 
-type DocumentBase = {
+type PaymentBase = {
   id: string;
-  vendor_id?: string | null;
+  expense_id: string;
+  amount: number;
 };
 
 type NewVendorBase = {
@@ -54,7 +47,7 @@ type Props<
   TVendor extends VendorBase,
   TNewVendor extends NewVendorBase,
   TExpense extends ExpenseBase,
-  TDoc extends DocumentBase,
+  TPayment extends PaymentBase,
 > = {
   newVendor: TNewVendor;
   setNewVendor: React.Dispatch<React.SetStateAction<TNewVendor>>;
@@ -62,14 +55,13 @@ type Props<
 
   vendors: TVendor[];
   expenses: TExpense[];
-  documents: TDoc[]; // 🔥 novo (contratos)
+  payments: TPayment[];
 
   onStatusChange: (id: string, status: VendorStatus) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
 
   // integração
   onGoToVendorExpenses: (vendorId: string) => void;
-  onGoToVendorDocs: (vendorId: string) => void; // 🔥 novo
 
   // UX premium
   isBusy?: boolean;
@@ -151,47 +143,58 @@ function ConfirmDialog({
   );
 }
 
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function deriveExpenseStatus(
+  storedStatus: VendorStatus | ExpenseStatus | undefined,
+  paidSum: number,
+  value: number
+): VendorStatus {
+  if ((storedStatus as any) === 'cancelled') return 'cancelled';
+  if (value > 0 && paidSum >= value) return 'paid';
+  if (paidSum > 0) return 'confirmed';
+  return 'pending';
+}
+
 function computeAggregateStatus(statuses: VendorStatus[]): VendorStatus {
   if (statuses.length === 0) return 'pending';
 
   const nonCancelled = statuses.filter((s) => s !== 'cancelled');
 
-  // tudo cancelado
   if (nonCancelled.length === 0) return 'cancelled';
-
-  // tudo pago (ignorando cancelados)
   if (nonCancelled.every((s) => s === 'paid')) return 'paid';
 
-  // prioridade de atenção
   if (nonCancelled.includes('pending')) return 'pending';
   if (nonCancelled.includes('confirmed')) return 'confirmed';
 
   return 'pending';
 }
 
-function toBRL(n: number) {
-  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+function formatPct(n: number) {
+  if (!Number.isFinite(n)) return '0%';
+  return `${Math.round(n)}%`;
 }
 
 export function VendorsTab<
   TVendor extends VendorBase,
   TNewVendor extends NewVendorBase,
   TExpense extends ExpenseBase,
-  TDoc extends DocumentBase,
+  TPayment extends PaymentBase,
 >({
   newVendor,
   setNewVendor,
   onAdd,
   vendors,
   expenses,
-  documents,
+  payments,
   onStatusChange,
   onDelete,
   onGoToVendorExpenses,
-  onGoToVendorDocs,
   isBusy = false,
   busyText = 'Aguarde…',
-}: Props<TVendor, TNewVendor, TExpense, TDoc>) {
+}: Props<TVendor, TNewVendor, TExpense, TPayment>) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<{
     id: string;
@@ -200,15 +203,22 @@ export function VendorsTab<
   const [isDeleting, setIsDeleting] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
 
-  // despesas por fornecedor + totais + pagos + status agregado
+  const paidByExpenseId = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of payments) {
+      m.set(p.expense_id, (m.get(p.expense_id) ?? 0) + Number(p.amount || 0));
+    }
+    return m;
+  }, [payments]);
+
   const statsByVendor = useMemo(() => {
     const map = new Map<
       string,
       {
         countAll: number;
-        countActive: number; // != cancelled
-        totalActive: number; // soma != cancelled
-        paidTotal: number; // soma status=paid
+        countActive: number;
+        totalActive: number;
+        paidActive: number;
         statuses: VendorStatus[];
       }
     >();
@@ -217,46 +227,37 @@ export function VendorsTab<
       const vid = e.vendor_id ?? null;
       if (!vid) continue;
 
-      const st = ((e.status ?? 'pending') as VendorStatus) ?? 'pending';
+      const value = Number(e.value || 0);
+      const paid = paidByExpenseId.get(e.id) ?? 0;
+
+      const st = deriveExpenseStatus(
+        (e.status ?? 'pending') as any,
+        paid,
+        value
+      );
 
       const cur = map.get(vid) ?? {
         countAll: 0,
         countActive: 0,
         totalActive: 0,
-        paidTotal: 0,
+        paidActive: 0,
         statuses: [] as VendorStatus[],
       };
 
       cur.countAll += 1;
       cur.statuses.push(st);
 
-      const value = Number(e.value || 0);
-
       if (st !== 'cancelled') {
         cur.countActive += 1;
         cur.totalActive += value;
-      }
-
-      if (st === 'paid') {
-        cur.paidTotal += value;
+        cur.paidActive += clamp(paid, 0, value);
       }
 
       map.set(vid, cur);
     }
 
     return map;
-  }, [expenses]);
-
-  // contratos por fornecedor (documentos vinculados)
-  const docsByVendor = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const d of documents) {
-      const vid = d.vendor_id ?? null;
-      if (!vid) continue;
-      map.set(vid, (map.get(vid) ?? 0) + 1);
-    }
-    return map;
-  }, [documents]);
+  }, [expenses, paidByExpenseId]);
 
   const blocking = isBusy || isDeleting || isAdding;
 
@@ -292,7 +293,6 @@ export function VendorsTab<
         </div>
       )}
 
-      {/* Form */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-4">
         <input
           value={newVendor.name}
@@ -347,14 +347,13 @@ export function VendorsTab<
         </button>
       </div>
 
-      {/* Lista */}
       <div className="space-y-2">
         {vendors.map((v) => {
           const linked = statsByVendor.get(v.id);
           const countAll = linked?.countAll ?? 0;
           const countActive = linked?.countActive ?? 0;
           const totalActive = linked?.totalActive ?? 0;
-          const paidTotal = linked?.paidTotal ?? 0;
+          const paidActive = linked?.paidActive ?? 0;
 
           const computedStatus =
             countAll > 0 ? computeAggregateStatus(linked!.statuses) : v.status;
@@ -365,26 +364,16 @@ export function VendorsTab<
               ? 'Vinculado (1 despesa)'
               : `Vinculado (${countAll} despesas)`;
 
-          const contractCount = docsByVendor.get(v.id) ?? 0;
-          const contractText =
-            contractCount === 1
-              ? 'Contrato (1 doc)'
-              : `Contrato (${contractCount} docs)`;
-
-          const percentPaid =
-            totalActive > 0
-              ? Math.min((paidTotal / totalActive) * 100, 100)
-              : 0;
+          const pct = totalActive > 0 ? (paidActive / totalActive) * 100 : 0;
 
           return (
             <div
               key={v.id}
-              className="flex items-start gap-3 p-4 bg-gray-50 rounded-lg"
+              className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg"
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-gray-800 font-medium">{v.name}</p>
-
+                  <p className="text-gray-800 font-medium truncate">{v.name}</p>
                   <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600">
                     {v.category}
                   </span>
@@ -401,21 +390,6 @@ export function VendorsTab<
                     >
                       <Link2 className="w-3 h-3" />
                       {badgeText}
-                    </button>
-                  )}
-
-                  {contractCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => onGoToVendorDocs(v.id)}
-                      disabled={blocking}
-                      className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-purple-50 text-purple-700 border border-purple-100 hover:bg-purple-100 transition ${
-                        blocking ? 'opacity-60 cursor-not-allowed' : ''
-                      }`}
-                      title="Ver documentos/contratos desse fornecedor"
-                    >
-                      <FileText className="w-3 h-3" />
-                      {contractText}
                     </button>
                   )}
                 </div>
@@ -436,37 +410,28 @@ export function VendorsTab<
                   )}
                 </div>
 
-                {/* Financeiro do fornecedor (premium) */}
                 {countAll > 0 && (
-                  <div className="mt-3">
-                    <div className="flex items-center justify-between text-sm text-gray-700">
+                  <div className="mt-2">
+                    <div className="flex items-center justify-between text-xs text-gray-600">
                       <span>
-                        Total ativo: <b>{toBRL(totalActive)}</b>
-                        {countAll !== countActive ? (
-                          <span className="text-xs text-gray-500">
-                            {' '}
-                            (canceladas: {countAll - countActive})
-                          </span>
-                        ) : null}
+                        Pago: <b>R$ {paidActive.toFixed(2)}</b> / Total:{' '}
+                        <b>R$ {totalActive.toFixed(2)}</b>
                       </span>
-
-                      <span className="text-sm">
-                        Pago: <b>{toBRL(paidTotal)}</b>
-                        {totalActive > 0 ? (
-                          <span className="text-xs text-gray-500">
-                            {' '}
-                            • {percentPaid.toFixed(0)}%
-                          </span>
-                        ) : null}
+                      <span className="text-gray-700 font-medium">
+                        {formatPct(pct)}
                       </span>
                     </div>
-
-                    <div className="mt-2 w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div className="w-full h-2 bg-gray-200 rounded-full mt-1 overflow-hidden">
                       <div
-                        className="bg-green-500 h-2 rounded-full"
-                        style={{ width: `${percentPaid}%` }}
+                        className="h-2 bg-green-500 rounded-full"
+                        style={{ width: `${clamp(pct, 0, 100)}%` }}
                       />
                     </div>
+                    {countAll !== countActive && (
+                      <div className="mt-1 text-xs text-gray-500">
+                        Canceladas: {countAll - countActive}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -481,7 +446,11 @@ export function VendorsTab<
                   className={`px-3 py-1 rounded text-sm font-medium ${VENDOR_STATUS[computedStatus].bg} ${
                     VENDOR_STATUS[computedStatus].color
                   } ${isAuto || blocking ? 'opacity-90 cursor-not-allowed' : ''}`}
-                  title={isAuto ? 'Status vindo do Financeiro' : 'Status'}
+                  title={
+                    isAuto
+                      ? 'Status vindo dos pagamentos (Financeiro)'
+                      : 'Status'
+                  }
                 >
                   <option value="pending">Pendente</option>
                   <option value="confirmed">Confirmado</option>
@@ -520,7 +489,7 @@ export function VendorsTab<
         title="Excluir fornecedor?"
         description={
           confirmTarget
-            ? `Tem certeza que deseja excluir “${confirmTarget.name}”? Se houver despesas/documentos vinculados, eles continuarão existindo (mas podem perder o vínculo, dependendo do seu banco).`
+            ? `Tem certeza que deseja excluir “${confirmTarget.name}”? Se houver despesas vinculadas, elas continuarão existindo (mas podem perder o vínculo, dependendo do seu banco).`
             : undefined
         }
         confirmText="Excluir"

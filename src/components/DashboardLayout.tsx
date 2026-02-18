@@ -11,6 +11,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
+import { PlanAssistantWidget } from './PlanAssistantWidget';
 
 export function DashboardLayout() {
   const { user, signOut } = useAuth();
@@ -310,6 +311,8 @@ export function DashboardLayout() {
           className="fixed inset-0 z-40 bg-black/50 md:hidden backdrop-blur-sm"
         />
       )}
+
+      <PlanAssistantWidget />
     </div>
   );
 }

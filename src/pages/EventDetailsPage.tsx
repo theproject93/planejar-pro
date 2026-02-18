@@ -242,6 +242,7 @@ type SmartTimelineSuggestion = {
   time: string;
   assignee: string;
   priority: 'high' | 'normal';
+  source?: 'rules' | 'ai';
 };
 
 type DocumentRow = {
@@ -337,6 +338,50 @@ function normalizeText(value: string) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+function sanitizeTimeValue(value: string) {
+  const match = value.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)/);
+  if (!match) return '10:00';
+  return `${match[1].padStart(2, '0')}:${match[2]}`;
+}
+
+function pickString(
+  source: Record<string, unknown>,
+  keys: string[],
+  fallback = ''
+) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return fallback;
+}
+
+function normalizeAiSuggestion(raw: unknown, index: number): SmartTimelineSuggestion | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const candidate = raw as Record<string, unknown>;
+
+  const title = pickString(candidate, ['title', 'titulo'], `Sugestão IA ${index + 1}`);
+  const reason = pickString(candidate, ['reason', 'motivo', 'justificativa'], 'Sugestão gerada pela IA híbrida.');
+  const activity = pickString(candidate, ['activity', 'atividade', 'task'], '');
+  if (!activity) return null;
+
+  const assignee = pickString(candidate, ['assignee', 'responsavel', 'owner'], 'Assessoria');
+  const rawPriority = pickString(candidate, ['priority', 'prioridade'], 'normal').toLowerCase();
+  const priority: 'high' | 'normal' = rawPriority === 'high' || rawPriority === 'alta' ? 'high' : 'normal';
+  const time = sanitizeTimeValue(pickString(candidate, ['time', 'hora'], '10:00'));
+
+  return {
+    id: `ai-${index}-${normalizeText(title).slice(0, 24)}`,
+    title,
+    reason,
+    activity,
+    time,
+    assignee,
+    priority,
+    source: 'ai',
+  };
+}
+
 function normalizeGuestRsvpStatus(
   guest: Pick<GuestRow, 'confirmed' | 'rsvp_status'>
 ): 'pending' | 'confirmed' | 'declined' {
@@ -380,7 +425,7 @@ const PRIORITY_CONFIG = {
 export function EventDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const eventId = id ?? '';
-  const { user } = useAuth();
+  const { user, session } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -445,6 +490,15 @@ export function EventDetailsPage() {
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [team, setTeam] = useState<TeamMemberRow[]>([]);
   const [tables, setTables] = useState<TableRow[]>([]);
+  const [aiTimelineSuggestions, setAiTimelineSuggestions] = useState<
+    SmartTimelineSuggestion[]
+  >([]);
+  const [loadingAiTimelineSuggestions, setLoadingAiTimelineSuggestions] =
+    useState(false);
+  const [aiTimelineError, setAiTimelineError] = useState<string | null>(null);
+  const [lastAiTimelineRunAt, setLastAiTimelineRunAt] = useState<string | null>(
+    null
+  );
 
   const paymentReceiptCountByVendor = useMemo(() => {
     const documentsById = new Map(documents.map((doc) => [doc.id, doc]));
@@ -517,6 +571,12 @@ export function EventDetailsPage() {
 
   const [newTable, setNewTable] = useState({ name: '', seats: 8 });
   const [draggedTaskIndex, setDraggedTaskIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    setAiTimelineSuggestions([]);
+    setAiTimelineError(null);
+    setLastAiTimelineRunAt(null);
+  }, [eventId]);
 
   // --------------------
   // Derived
@@ -730,6 +790,7 @@ export function EventDetailsPage() {
         time: '15:00',
         assignee: 'Assessoria',
         priority: 'high',
+        source: 'rules',
       });
     }
 
@@ -742,6 +803,7 @@ export function EventDetailsPage() {
         time: '10:00',
         assignee: 'Assessoria',
         priority: 'high',
+        source: 'rules',
       });
     }
 
@@ -754,6 +816,7 @@ export function EventDetailsPage() {
         time: '11:00',
         assignee: 'Recepção',
         priority: 'high',
+        source: 'rules',
       });
     }
 
@@ -766,6 +829,7 @@ export function EventDetailsPage() {
         time: '14:00',
         assignee: 'Coordenação',
         priority: 'normal',
+        source: 'rules',
       });
     }
 
@@ -778,6 +842,7 @@ export function EventDetailsPage() {
         time: '09:00',
         assignee: 'Equipe interna',
         priority: 'high',
+        source: 'rules',
       });
     }
 
@@ -790,6 +855,7 @@ export function EventDetailsPage() {
         time: '16:00',
         assignee: 'Financeiro',
         priority: 'normal',
+        source: 'rules',
       });
     }
 
@@ -802,6 +868,7 @@ export function EventDetailsPage() {
         time: '18:00',
         assignee: 'Assessoria',
         priority: 'high',
+        source: 'rules',
       });
     }
 
@@ -814,6 +881,23 @@ export function EventDetailsPage() {
     overdueTasks.length,
     budgetProgress,
   ]);
+
+  const timelineSuggestions = useMemo(() => {
+    const combined = [...aiTimelineSuggestions, ...smartTimelineSuggestions];
+    const seen = new Set<string>();
+    const out: SmartTimelineSuggestion[] = [];
+
+    combined.forEach((suggestion) => {
+      const dedupeKey = normalizeText(
+        `${suggestion.title}|${suggestion.activity}|${suggestion.time}`
+      );
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      out.push(suggestion);
+    });
+
+    return out.slice(0, 8);
+  }, [aiTimelineSuggestions, smartTimelineSuggestions]);
 
   // --------------------
   // Load
@@ -1697,6 +1781,110 @@ export function EventDetailsPage() {
       });
     } catch (err: any) {
       setErrorMsg(err?.message ?? 'Erro ao aplicar sugestao inteligente.');
+    }
+  }
+
+  async function generateHybridTimelineSuggestions() {
+    if (!event) return;
+
+    setLoadingAiTimelineSuggestions(true);
+    setAiTimelineError(null);
+
+    try {
+      let accessToken = session?.access_token ?? null;
+      if (!accessToken) {
+        const {
+          data: { session: runtimeSession },
+        } = await supabase.auth.getSession();
+        accessToken = runtimeSession?.access_token ?? null;
+      }
+      if (!accessToken) {
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        accessToken = refreshed.session?.access_token ?? null;
+      }
+      if (!accessToken) {
+        throw new Error('Sessao expirada. Faça login novamente para usar a IA.');
+      }
+
+      const payload = {
+        source: 'planejar-pro',
+        event: {
+          id: event.id,
+          name: displayName,
+          event_type: event.event_type,
+          event_date: event.event_date,
+          location: event.location,
+        },
+        metrics: {
+          days_remaining: daysRemaining,
+          budget_progress: Number(budgetProgress.toFixed(2)),
+          pending_tasks_count: pendingTasks.length,
+          overdue_tasks_count: overdueTasks.length,
+          pending_guests_count: unconfirmedGuests,
+          vendors_count: vendors.length,
+        },
+        timeline: timeline.slice(0, 40).map((item) => ({
+          time: item.time,
+          activity: item.activity,
+          assignee: item.assignee_name ?? '',
+        })),
+        tasks: pendingTasks.slice(0, 40).map((task) => ({
+          text: task.text,
+          due_date: task.due_date ?? null,
+          priority: task.priority ?? 'normal',
+          assignee: task.assignee_name ?? null,
+        })),
+        vendors: vendors.slice(0, 50).map((vendor) => ({
+          name: vendor.name,
+          category: vendor.category,
+          expected_arrival_time: vendor.expected_arrival_time ?? null,
+          expected_done_time: vendor.expected_done_time ?? null,
+        })),
+        rules_suggestions: smartTimelineSuggestions.map((suggestion) => ({
+          title: suggestion.title,
+          reason: suggestion.reason,
+          activity: suggestion.activity,
+          time: suggestion.time,
+          assignee: suggestion.assignee,
+          priority: suggestion.priority,
+        })),
+      };
+
+      const { data, error } = await supabase.functions.invoke('timeline-ai', {
+        body: payload,
+      });
+      if (error) throw error;
+      const rawJson: unknown = data;
+
+      const suggestionsRaw: unknown[] = Array.isArray(rawJson)
+        ? rawJson
+        : rawJson &&
+            typeof rawJson === 'object' &&
+            Array.isArray((rawJson as Record<string, unknown>).suggestions)
+          ? ((rawJson as Record<string, unknown>).suggestions as unknown[])
+          : [];
+
+      const parsed = suggestionsRaw
+        .map((item, index) => normalizeAiSuggestion(item, index))
+        .filter((item): item is SmartTimelineSuggestion => item !== null)
+        .slice(0, 5);
+
+      setAiTimelineSuggestions(parsed);
+      setLastAiTimelineRunAt(new Date().toISOString());
+
+      if (parsed.length === 0) {
+        setAiTimelineError(
+          'A IA não retornou sugestões válidas. Mantendo somente as regras locais.'
+        );
+      }
+    } catch (err: unknown) {
+      setAiTimelineError(
+        err instanceof Error
+          ? err.message
+          : 'Falha ao gerar sugestões via IA.'
+      );
+    } finally {
+      setLoadingAiTimelineSuggestions(false);
     }
   }
 
@@ -2635,29 +2823,64 @@ export function EventDetailsPage() {
                     Linha do tempo inteligente
                   </h3>
                   <p className="text-xs text-gray-500 mt-1">
-                    Sugestões automáticas baseadas no progresso do evento.
+                    Camada híbrida: regras locais + endpoint de IA (quando configurado).
                   </p>
                 </div>
-                <span className="text-xs px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 font-semibold">
-                  Assistente IA
-                </span>
+                <div className="flex flex-col items-end gap-2">
+                  <span className="text-xs px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 font-semibold">
+                    Assistente IA
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => generateHybridTimelineSuggestions()}
+                    disabled={loadingAiTimelineSuggestions}
+                    className="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-60"
+                  >
+                    {loadingAiTimelineSuggestions
+                      ? 'Gerando...'
+                      : 'Gerar sugestões IA'}
+                  </button>
+                </div>
               </div>
 
-              {smartTimelineSuggestions.length === 0 ? (
+              {lastAiTimelineRunAt && (
+                <p className="text-[11px] text-gray-500 mb-3">
+                  Última execução IA: {new Date(lastAiTimelineRunAt).toLocaleString('pt-BR')}
+                </p>
+              )}
+
+              {aiTimelineError && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                  {aiTimelineError}
+                </p>
+              )}
+
+              {timelineSuggestions.length === 0 ? (
                 <p className="text-sm text-gray-500">
                   Nenhuma sugestão pendente no momento.
                 </p>
               ) : (
                 <div className="space-y-3">
-                  {smartTimelineSuggestions.map((suggestion) => (
+                  {timelineSuggestions.map((suggestion) => (
                     <div
                       key={suggestion.id}
                       className="rounded-lg border border-gray-100 bg-gray-50 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
                     >
                       <div>
-                        <p className="text-sm font-semibold text-gray-900">
-                          {suggestion.title}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-gray-900">
+                            {suggestion.title}
+                          </p>
+                          <span
+                            className={`text-[11px] px-2 py-0.5 rounded-full border ${
+                              suggestion.source === 'ai'
+                                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                : 'bg-gray-50 text-gray-600 border-gray-200'
+                            }`}
+                          >
+                            {suggestion.source === 'ai' ? 'IA' : 'Regras'}
+                          </span>
+                        </div>
                         <p className="text-xs text-gray-600 mt-1">{suggestion.reason}</p>
                         <p className="text-xs text-gray-500 mt-1">
                           Sugestão: {suggestion.time} • {suggestion.activity}

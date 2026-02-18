@@ -52,6 +52,11 @@ const VendorCommandCenterPage = lazy(() =>
     default: mod.VendorCommandCenterPage,
   }))
 );
+const CouplePortalPage = lazy(() =>
+  import('./pages/CouplePortalPage').then((mod) => ({
+    default: mod.CouplePortalPage,
+  }))
+);
 const GuestInvitePage = lazy(() =>
   import('./pages/GuestInvitePage').then((mod) => ({
     default: mod.GuestInvitePage,
@@ -303,6 +308,7 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/atendimento-ia" element={<AtendimentoIAPage />} />
             <Route path="/torre/:token" element={<VendorCommandCenterPage />} />
+            <Route path="/noivos/:token" element={<CouplePortalPage />} />
             <Route path="/convite/:token" element={<GuestInvitePage />} />
             <Route
               path="/politica-de-privacidade"

@@ -179,7 +179,8 @@ export function LandingPage() {
             className="mb-12 text-lg font-light text-gray-200 lg:text-xl sm:px-16 lg:px-48 leading-relaxed drop-shadow-md max-w-4xl mx-auto"
           >
             Eleve o nível da sua assessoria. Gestão impecável, checklists
-            precisos e controle financeiro, tudo em uma interface sofisticada.
+            precisos, controle financeiro e a Plan IA, sua assistente especialista
+            em eventos para te guiar dentro da plataforma.
           </motion.p>
 
           <motion.div
@@ -225,6 +226,38 @@ export function LandingPage() {
                 Planejar Pro foi desenhado para quem vive a rotina de eventos e precisa de controle
                 total, agilidade e um padrão profissional em cada entrega.
               </p>
+            </div>
+          </ScrollReveal>
+
+          <ScrollReveal delay={0.05}>
+            <div className="mb-14 grid lg:grid-cols-2 gap-8 items-center">
+              <div className="rounded-3xl border border-gold-200 bg-white p-8 shadow-lg">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gold-600">
+                  Diferencial IA
+                </p>
+                <h3 className="mt-2 text-2xl font-bold text-gray-900">
+                  A Plan entende de eventos e te guia dentro da plataforma
+                </h3>
+                <p className="mt-4 text-gray-600 leading-relaxed">
+                  Enquanto você organiza fornecedores, convidados, cronograma e
+                  financeiro, a Plan atua como uma assistente ativa: responde dúvidas
+                  com passo a passo, aponta pendências e ajuda você a manter o evento
+                  sob controle sem depender de suporte externo.
+                </p>
+                <ul className="mt-5 space-y-2 text-sm text-gray-700">
+                  <li>• Orientação prática: onde clicar, o que preencher e como validar</li>
+                  <li>• Alertas proativos de operação para não perder prazos críticos</li>
+                  <li>• Linguagem simples para uso diário por assessoras e cerimonialistas</li>
+                </ul>
+              </div>
+              <div className="rounded-3xl border border-gray-200 bg-white p-4 shadow-lg">
+                <img
+                  src="/images/plan-full-real.png"
+                  alt="Plan IA, assistente virtual da plataforma"
+                  className="w-full h-auto rounded-2xl"
+                  loading="lazy"
+                />
+              </div>
             </div>
           </ScrollReveal>
 
@@ -277,14 +310,14 @@ export function LandingPage() {
             <ScrollReveal delay={0.4}>
               <div className="bg-white p-7 rounded-2xl border border-gray-200 hover:shadow-xl transition-all duration-300 h-full">
                 <div className="w-12 h-12 rounded-full bg-gold-100 flex items-center justify-center mb-4">
-                  <span className="text-xl">💳</span>
+                  <span className="text-xl">🤖</span>
                 </div>
                 <h3 className="text-lg font-bold text-gray-900 mb-2">
-                  Diferencial Percebido Pelo Cliente
+                  Plan IA Especialista em Eventos
                 </h3>
                 <p className="text-gray-600 text-sm leading-relaxed">
-                  Uma operação organizada aumenta sua autoridade no atendimento e valoriza
-                  o seu serviço frente à concorrência.
+                  Tire dúvidas em tempo real, receba orientações detalhadas e
+                  alertas proativos para não esquecer etapas críticas da operação.
                 </p>
               </div>
             </ScrollReveal>
@@ -357,14 +390,14 @@ export function LandingPage() {
             <ScrollReveal delay={0.5}>
               <div className="bg-gray-50 p-8 rounded-2xl border border-gray-100 hover:shadow-xl hover:-translate-y-2 transition-all duration-300 group">
                 <div className="w-14 h-14 bg-gold-100 rounded-full flex items-center justify-center mb-6 group-hover:bg-gold-400 transition-colors">
-                  <span className="text-2xl">📱</span>
+                  <span className="text-2xl">🤖</span>
                 </div>
                 <h3 className="text-xl font-bold mb-3 text-gray-900">
-                  Acesso Mobile
+                  Assistente IA da Plataforma
                 </h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Tenha todas as informações na palma da mão durante os eventos.
-                  Nada de pastas pesadas.
+                  A Plan entende o fluxo de eventos e te orienta com passos claros:
+                  onde clicar, o que preencher e como validar cada processo.
                 </p>
               </div>
             </ScrollReveal>

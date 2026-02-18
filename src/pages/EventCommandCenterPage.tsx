@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   AlertTriangle,
-  CheckCircle2,
   ClipboardCopy,
   Clock,
+  ImagePlus,
+  Link2,
   Loader2,
   MapPin,
   Rocket,
   ShieldAlert,
-  ShieldCheck,
   Users,
   Wrench,
 } from 'lucide-react';
@@ -21,6 +21,8 @@ type EventRow = {
   name: string;
   event_date: string;
   location: string | null;
+  couple: string | null;
+  couple_portal_token: string | null;
 };
 
 type VendorRow = {
@@ -79,6 +81,9 @@ type CoupleUpdateRow = {
   kind: 'info' | 'milestone' | 'celebration';
   title: string;
   message: string;
+  photo_url: string | null;
+  author_role: 'assessoria' | 'noivos';
+  author_name: string | null;
   created_at: string;
 };
 
@@ -114,6 +119,16 @@ const ALERT_COLOR: Record<ComputedAlert['severity'], string> = {
   info: 'border-blue-200 bg-blue-50 text-blue-800',
   warning: 'border-amber-200 bg-amber-50 text-amber-800',
   critical: 'border-red-200 bg-red-50 text-red-800',
+};
+
+const COUPLE_ROLE_STYLE: Record<CoupleUpdateRow['author_role'], string> = {
+  assessoria: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  noivos: 'bg-rose-50 text-rose-700 border-rose-200',
+};
+
+const COUPLE_ROLE_LABEL: Record<CoupleUpdateRow['author_role'], string> = {
+  assessoria: 'Assessoria',
+  noivos: 'Noivos',
 };
 
 function combineDateTime(dateStr: string, timeStr: string | null) {
@@ -154,6 +169,8 @@ export function EventCommandCenterPage() {
   const [savingIncident, setSavingIncident] = useState(false);
   const [resolvingIncidentId, setResolvingIncidentId] = useState<string | null>(null);
   const [savingCoupleUpdate, setSavingCoupleUpdate] = useState(false);
+  const [uploadingCouplePhoto, setUploadingCouplePhoto] = useState(false);
+  const [copiedCoupleLink, setCopiedCoupleLink] = useState(false);
   const [incidentForm, setIncidentForm] = useState({
     vendor_id: '',
     severity: 'warning' as 'warning' | 'critical',
@@ -166,6 +183,7 @@ export function EventCommandCenterPage() {
     title: '',
     message: '',
   });
+  const [coupleUpdatePhoto, setCoupleUpdatePhoto] = useState<File | null>(null);
 
   const loadData = useCallback(async () => {
     if (!eventId || !user) return;
@@ -183,7 +201,7 @@ export function EventCommandCenterPage() {
       await Promise.all([
       supabase
         .from('events')
-        .select('id, name, event_date, location')
+        .select('id, name, event_date, location, couple, couple_portal_token')
         .eq('id', eventId)
         .eq('user_id', user.id)
         .single(),
@@ -220,7 +238,9 @@ export function EventCommandCenterPage() {
         .limit(30),
       supabase
         .from('event_couple_updates')
-        .select('id, event_id, kind, title, message, created_at')
+        .select(
+          'id, event_id, kind, title, message, photo_url, author_role, author_name, created_at'
+        )
         .eq('event_id', eventId)
         .order('created_at', { ascending: false })
         .limit(20),
@@ -256,7 +276,6 @@ export function EventCommandCenterPage() {
   }, [eventId, user]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadData();
   }, [loadData]);
 
@@ -360,16 +379,6 @@ export function EventCommandCenterPage() {
     return { open, resolved };
   }, [incidents]);
 
-  const tranquilidadeMensagem = useMemo(() => {
-    const criticalOpen = incidents.filter(
-      (incident) => incident.status === 'open' && incident.severity === 'critical'
-    ).length;
-    if (criticalOpen > 0) {
-      return 'A assessoria esta conduzindo ajustes internos e mantendo tudo sob controle.';
-    }
-    return 'Operacao fluindo conforme o planejado. Aproveitem cada momento.';
-  }, [incidents]);
-
   const noivosFeed = useMemo(() => {
     if (coupleUpdates.length > 0) return coupleUpdates.slice(0, 5);
     return [
@@ -380,6 +389,9 @@ export function EventCommandCenterPage() {
         title: 'Equipe em operacao',
         message:
           'Todos os fornecedores estao sendo acompanhados em tempo real pela assessoria.',
+        photo_url: null,
+        author_role: 'assessoria' as const,
+        author_name: 'Assessoria',
         created_at: new Date().toISOString(),
       },
     ];
@@ -413,19 +425,10 @@ export function EventCommandCenterPage() {
     persistAlerts();
   }, [alertsForView, storedAlerts, eventId]);
 
-  const noivosStats = useMemo(() => {
-    const total = vendors.length;
-    const arrivedOrDone = vendors.filter((vendor) => {
-      const st = latestStatus.get(vendor.id)?.status ?? 'pending';
-      return st === 'arrived' || st === 'done';
-    }).length;
-    const done = vendors.filter((vendor) => {
-      const st = latestStatus.get(vendor.id)?.status ?? 'pending';
-      return st === 'done';
-    }).length;
-    const pct = total > 0 ? Math.round((arrivedOrDone / total) * 100) : 100;
-    return { total, arrivedOrDone, done, pct };
-  }, [vendors, latestStatus]);
+  const couplePortalUrl = useMemo(() => {
+    if (!event?.couple_portal_token) return '';
+    return `${window.location.origin}/noivos/${event.couple_portal_token}`;
+  }, [event?.couple_portal_token]);
 
   async function updateStatus(vendorId: string, status: StatusRow['status']) {
     if (!eventId) return;
@@ -485,7 +488,9 @@ export function EventCommandCenterPage() {
     if (!eventId) return;
     const { data } = await supabase
       .from('event_couple_updates')
-      .select('id, event_id, kind, title, message, created_at')
+      .select(
+        'id, event_id, kind, title, message, photo_url, author_role, author_name, created_at'
+      )
       .eq('event_id', eventId)
       .order('created_at', { ascending: false })
       .limit(20);
@@ -534,6 +539,35 @@ export function EventCommandCenterPage() {
     await refreshIncidents();
   }
 
+  async function uploadCouplePhoto(file: File) {
+    if (!eventId) return null;
+    setUploadingCouplePhoto(true);
+    try {
+      const extension = file.name.split('.').pop() ?? 'jpg';
+      const path = `assessoria/${eventId}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+      const upload = await supabase.storage.from('couple-updates').upload(path, file, {
+        upsert: false,
+        contentType: file.type,
+      });
+      if (upload.error) throw upload.error;
+
+      const { data } = supabase.storage.from('couple-updates').getPublicUrl(path);
+      return data.publicUrl;
+    } catch (error) {
+      console.error('Erro no upload da foto para noivos', error);
+      return null;
+    } finally {
+      setUploadingCouplePhoto(false);
+    }
+  }
+
+  async function copyCouplePortalLink() {
+    if (!couplePortalUrl) return;
+    await navigator.clipboard.writeText(couplePortalUrl);
+    setCopiedCoupleLink(true);
+    window.setTimeout(() => setCopiedCoupleLink(false), 1500);
+  }
+
   async function createCoupleUpdate() {
     if (!eventId || !user) return;
     const title = coupleUpdateForm.title.trim();
@@ -541,12 +575,23 @@ export function EventCommandCenterPage() {
     if (!title || !message) return;
 
     setSavingCoupleUpdate(true);
+    let photoUrl: string | null = null;
+    if (coupleUpdatePhoto) {
+      photoUrl = await uploadCouplePhoto(coupleUpdatePhoto);
+      if (!photoUrl) {
+        setSavingCoupleUpdate(false);
+        return;
+      }
+    }
     await supabase.from('event_couple_updates').insert({
       event_id: eventId,
       user_id: user.id,
       kind: coupleUpdateForm.kind,
       title,
       message,
+      photo_url: photoUrl,
+      author_role: 'assessoria',
+      author_name: 'Assessoria',
     });
 
     setCoupleUpdateForm({
@@ -554,6 +599,7 @@ export function EventCommandCenterPage() {
       title: '',
       message: '',
     });
+    setCoupleUpdatePhoto(null);
     setSavingCoupleUpdate(false);
     await refreshCoupleUpdates();
   }
@@ -583,7 +629,7 @@ export function EventCommandCenterPage() {
               <Link to={`/dashboard/eventos/${event.id}`} className="hover:text-gray-700">
                 Voltar ao evento
               </Link>
-              <span>•</span>
+              <span>â€¢</span>
               <span>Torre de Controle</span>
             </div>
             <h1 className="text-3xl font-bold text-gray-900">Central do Evento</h1>
@@ -603,28 +649,39 @@ export function EventCommandCenterPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col items-stretch gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMode('assessoria')}
+                className={`px-4 py-2 rounded-full text-sm font-semibold ${
+                  mode === 'assessoria'
+                    ? 'bg-gray-900 text-white'
+                    : 'bg-white text-gray-600 border border-gray-200'
+                }`}
+              >
+                Modo Assessoria
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('noivos')}
+                className={`px-4 py-2 rounded-full text-sm font-semibold ${
+                  mode === 'noivos'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-white text-gray-600 border border-gray-200'
+                }`}
+              >
+                Modo Noivos
+              </button>
+            </div>
             <button
               type="button"
-              onClick={() => setMode('assessoria')}
-              className={`px-4 py-2 rounded-full text-sm font-semibold ${
-                mode === 'assessoria'
-                  ? 'bg-gray-900 text-white'
-                  : 'bg-white text-gray-600 border border-gray-200'
-              }`}
+              onClick={() => void copyCouplePortalLink()}
+              disabled={!couplePortalUrl}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-semibold text-gray-700 disabled:opacity-50"
             >
-              Modo Assessoria
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('noivos')}
-              className={`px-4 py-2 rounded-full text-sm font-semibold ${
-                mode === 'noivos'
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-white text-gray-600 border border-gray-200'
-              }`}
-            >
-              Modo Noivos
+              <Link2 className="w-4 h-4" />
+              {copiedCoupleLink ? 'Link copiado' : 'Copiar link dos noivos'}
             </button>
           </div>
         </div>
@@ -788,7 +845,7 @@ export function EventCommandCenterPage() {
                           <div>
                             <p className="font-semibold text-gray-900">{incident.title}</p>
                             <p className="text-xs text-gray-500 mt-1">
-                              {vendorInfo?.name ?? 'Sem fornecedor'} •{' '}
+                              {vendorInfo?.name ?? 'Sem fornecedor'} â€¢{' '}
                               {new Date(incident.created_at).toLocaleString('pt-BR')}
                             </p>
                           </div>
@@ -829,10 +886,17 @@ export function EventCommandCenterPage() {
             </div>
 
             <div className="mb-8 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-              <h2 className="text-lg font-bold text-gray-900">Comunicados para os noivos</h2>
+              <h2 className="text-lg font-bold text-gray-900">Canal Assessoria x Noivos</h2>
               <p className="text-sm text-gray-500 mt-1">
-                Publique atualizacoes positivas para o Modo Tranquilidade.
+                Mural compartilhado em tempo real. Os noivos postam pelo link exclusivo.
               </p>
+              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 inline-flex items-center gap-2">
+                <Link2 className="w-4 h-4" />
+                Portal dos noivos:
+                <span className="font-semibold text-gray-800">
+                  {couplePortalUrl || 'token indisponivel'}
+                </span>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4">
                 <select
                   value={coupleUpdateForm.kind}
@@ -863,41 +927,70 @@ export function EventCommandCenterPage() {
                   }
                   className="md:col-span-4 px-3 py-2 border border-gray-300 rounded-lg"
                   rows={3}
-                  placeholder="Mensagem para tranquilizar os noivos"
+                  placeholder="Mensagem positiva para o mural dos noivos"
                 />
               </div>
+              <label className="mt-3 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 text-sm cursor-pointer hover:bg-gray-50">
+                <ImagePlus className="w-4 h-4" />
+                {coupleUpdatePhoto ? 'Trocar foto' : 'Anexar foto (opcional)'}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(e) => setCoupleUpdatePhoto(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              {coupleUpdatePhoto ? (
+                <p className="mt-2 text-xs text-gray-500">{coupleUpdatePhoto.name}</p>
+              ) : null}
               <button
                 type="button"
                 onClick={createCoupleUpdate}
                 disabled={
                   savingCoupleUpdate ||
+                  uploadingCouplePhoto ||
                   !coupleUpdateForm.title.trim() ||
                   !coupleUpdateForm.message.trim()
                 }
                 className="mt-3 px-4 py-2 rounded-lg bg-emerald-600 text-white disabled:opacity-60"
               >
-                {savingCoupleUpdate ? 'Publicando...' : 'Publicar no modo noivos'}
+                {savingCoupleUpdate || uploadingCouplePhoto
+                  ? 'Publicando...'
+                  : 'Publicar no mural'}
               </button>
 
-              <div className="mt-4 space-y-2 max-h-56 overflow-auto pr-1">
+              <div className="mt-4 space-y-3 max-h-72 overflow-auto pr-1">
                 {coupleUpdates.length === 0 && (
-                  <p className="text-sm text-gray-400">Nenhum comunicado publicado.</p>
+                  <p className="text-sm text-gray-400">Nenhuma publicacao ainda.</p>
                 )}
                 {coupleUpdates.slice(0, 6).map((item) => (
                   <div
                     key={item.id}
                     className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2"
                   >
-                    <p className="text-sm font-semibold text-gray-900">{item.title}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-gray-900">{item.title}</p>
+                      <span
+                        className={`text-[11px] px-2 py-1 rounded-full border font-semibold ${COUPLE_ROLE_STYLE[item.author_role]}`}
+                      >
+                        {item.author_name?.trim() || COUPLE_ROLE_LABEL[item.author_role]}
+                      </span>
+                    </div>
                     <p className="text-sm text-gray-600 mt-1">{item.message}</p>
+                    {item.photo_url ? (
+                      <img
+                        src={item.photo_url}
+                        alt={item.title}
+                        className="mt-2 w-full max-h-56 object-cover rounded-lg border border-gray-200"
+                      />
+                    ) : null}
                     <p className="text-xs text-gray-500 mt-1">
                       {item.kind} • {new Date(item.created_at).toLocaleString('pt-BR')}
                     </p>
                   </div>
                 ))}
               </div>
-            </div>
-          </>
+            </div>          </>
         )}
 
         <div className="mb-8 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
@@ -920,7 +1013,7 @@ export function EventCommandCenterPage() {
                   <div>
                     <p className="font-semibold text-gray-900">{vendor.name}</p>
                     <p className="text-xs text-gray-500 mt-1">
-                      Chegada: {vendor.expected_arrival_time ?? '--'} • Finalizacao:{' '}
+                      Chegada: {vendor.expected_arrival_time ?? '--'} â€¢ Finalizacao:{' '}
                       {vendor.expected_done_time ?? '--'}
                     </p>
                   </div>
@@ -976,7 +1069,7 @@ export function EventCommandCenterPage() {
                     <p className="mt-2 text-xs text-gray-500">
                       Ultima atualizacao:{' '}
                       {new Date(latestUpdate.created_at).toLocaleTimeString('pt-BR')}
-                      {latestUpdate.note ? ` • ${latestUpdate.note}` : ''}
+                      {latestUpdate.note ? ` â€¢ ${latestUpdate.note}` : ''}
                     </p>
                   )}
 
@@ -1013,10 +1106,10 @@ export function EventCommandCenterPage() {
                           <span className="font-semibold text-gray-800">
                             {STATUS_LABEL[row.status]}
                           </span>{' '}
-                          • {new Date(row.created_at).toLocaleTimeString('pt-BR')}
-                          {' • '}
+                          â€¢ {new Date(row.created_at).toLocaleTimeString('pt-BR')}
+                          {' â€¢ '}
                           {row.updated_by === 'fornecedor' ? 'fornecedor' : 'assessoria'}
-                          {row.note ? ` • ${row.note}` : ''}
+                          {row.note ? ` â€¢ ${row.note}` : ''}
                         </div>
                       ))}
                     </div>
@@ -1042,58 +1135,34 @@ export function EventCommandCenterPage() {
 
         {mode === 'noivos' && (
           <div className="space-y-6">
-            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-6 text-emerald-800">
-              <div className="flex items-center gap-2 text-lg font-semibold">
-                <ShieldCheck className="w-5 h-5" />
-                Tudo sob controle
-              </div>
-              <p className="text-sm mt-2">
-                {tranquilidadeMensagem}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white border border-gray-100 rounded-2xl p-5">
-                <p className="text-xs text-gray-500">Fornecedores ativos</p>
-                <p className="text-2xl font-bold text-gray-900 mt-2">{noivosStats.total}</p>
-              </div>
-              <div className="bg-white border border-gray-100 rounded-2xl p-5">
-                <p className="text-xs text-gray-500">Ja chegaram</p>
-                <p className="text-2xl font-bold text-gray-900 mt-2">
-                  {noivosStats.arrivedOrDone}
-                </p>
-              </div>
-              <div className="bg-white border border-gray-100 rounded-2xl p-5">
-                <p className="text-xs text-gray-500">Progresso operacional</p>
-                <p className="text-2xl font-bold text-gray-900 mt-2">{noivosStats.pct}%</p>
-              </div>
-            </div>
-
             <div className="bg-white border border-gray-100 rounded-2xl p-6">
-              <div className="flex items-center gap-2 text-gray-900 font-semibold">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                Mensagem para os noivos
-              </div>
-              <p className="text-sm text-gray-600 mt-2">
-                A producao esta sendo acompanhada em tempo real pela assessoria.
-                Aproveitem o evento.
-              </p>
-            </div>
-
-            <div className="bg-white border border-gray-100 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-gray-900">Atualizacoes da assessoria</h3>
+              <h3 className="text-lg font-bold text-gray-900">Mural noivos x assessoria</h3>
               <p className="text-sm text-gray-500 mt-1">
-                Resumo positivo das etapas para voces curtirem tranquilos.
+                Preview do portal dos noivos. Aqui so aparece o que foi postado no mural.
               </p>
               <div className="mt-4 space-y-3">
                 {noivosFeed.map((item) => (
                   <div
                     key={item.id}
-                    className="rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-3"
+                    className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3"
                   >
-                    <p className="text-sm font-semibold text-emerald-900">{item.title}</p>
-                    <p className="text-sm text-emerald-800 mt-1">{item.message}</p>
-                    <p className="text-xs text-emerald-700 mt-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-gray-900">{item.title}</p>
+                      <span
+                        className={`text-[11px] px-2 py-1 rounded-full border font-semibold ${COUPLE_ROLE_STYLE[item.author_role]}`}
+                      >
+                        {item.author_name?.trim() || COUPLE_ROLE_LABEL[item.author_role]}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-700 mt-1">{item.message}</p>
+                    {item.photo_url ? (
+                      <img
+                        src={item.photo_url}
+                        alt={item.title}
+                        className="mt-2 w-full max-h-72 object-cover rounded-lg border border-gray-200"
+                      />
+                    ) : null}
+                    <p className="text-xs text-gray-500 mt-2">
                       {new Date(item.created_at).toLocaleString('pt-BR')}
                     </p>
                   </div>
@@ -1158,3 +1227,6 @@ export function EventCommandCenterPage() {
     </div>
   );
 }
+
+
+

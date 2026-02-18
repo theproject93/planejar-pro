@@ -42,6 +42,11 @@ const EventDetailsPage = lazy(() =>
     default: mod.EventDetailsPage,
   }))
 );
+const FinanceiroPage = lazy(() =>
+  import('./pages/FinanceiroPage').then((mod) => ({
+    default: mod.FinanceiroPage,
+  }))
+);
 
 type DashboardEventSummary = {
   id: string;
@@ -311,13 +316,7 @@ function App() {
               />
               <Route
                 path="financeiro"
-                element={
-                  <div className="p-8">
-                    <h1 className="text-2xl font-bold text-gray-400">
-                      Página Financeira (Em breve)
-                    </h1>
-                  </div>
-                }
+                element={<FinanceiroPage />}
               />
               <Route
                 path="configuracoes"

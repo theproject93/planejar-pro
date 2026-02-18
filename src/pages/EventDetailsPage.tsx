@@ -2751,6 +2751,7 @@ export function EventDetailsPage() {
             event={event}
             guests={guests}
             baseInviteUrl={`${window.location.origin}/convite`}
+            makeWebhookUrl={import.meta.env.VITE_MAKE_WHATSAPP_WEBHOOK_URL ?? null}
             onUpdateInviteSettings={updateInviteSettings}
             onMarkPendingReminderSent={markPendingInviteReminderSent}
           />

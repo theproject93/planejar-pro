@@ -31,6 +31,7 @@ type Props<TGuest extends GuestLike> = {
   event: EventLike;
   guests: TGuest[];
   baseInviteUrl: string;
+  makeWebhookUrl?: string | null;
   onUpdateInviteSettings: (payload: {
     invite_message_template: string;
     invite_dress_code: string;
@@ -94,6 +95,7 @@ export function InvitesTab<TGuest extends GuestLike>({
   event,
   guests,
   baseInviteUrl,
+  makeWebhookUrl = null,
   onUpdateInviteSettings,
   onMarkPendingReminderSent,
 }: Props<TGuest>) {
@@ -112,8 +114,10 @@ export function InvitesTab<TGuest extends GuestLike>({
   const [dressCode, setDressCode] = useState((event.invite_dress_code ?? '').trim());
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isMarkingReminder, setIsMarkingReminder] = useState(false);
+  const [isDispatchingBulk, setIsDispatchingBulk] = useState(false);
   const [copiedGuestId, setCopiedGuestId] = useState<string | null>(null);
   const [copiedReport, setCopiedReport] = useState(false);
+  const [bulkDispatchFeedback, setBulkDispatchFeedback] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | GuestStatus>('all');
 
   const summary = useMemo(() => {
@@ -205,6 +209,104 @@ export function InvitesTab<TGuest extends GuestLike>({
       await onMarkPendingReminderSent();
     } finally {
       setIsMarkingReminder(false);
+    }
+  }
+
+  async function dispatchBulkWhatsApp() {
+    if (isDispatchingBulk) return;
+
+    if (!makeWebhookUrl) {
+      setBulkDispatchFeedback(
+        'Defina VITE_MAKE_WHATSAPP_WEBHOOK_URL para habilitar o disparo em massa.'
+      );
+      return;
+    }
+
+    const pendingGuests = guests.filter(
+      (guest) => normalizeStatus(guest.rsvp_status) === 'pending'
+    );
+
+    if (pendingGuests.length === 0) {
+      setBulkDispatchFeedback('Nao ha convidados pendentes para disparar.');
+      return;
+    }
+
+    const payloadGuests = pendingGuests
+      .map((guest) => {
+        const phone = (guest.phone ?? '').replace(/\D/g, '');
+        const inviteLink = guest.invite_token
+          ? `${baseInviteUrl}/${guest.invite_token}`
+          : '';
+        if (phone.length < 10 || !inviteLink) return null;
+
+        const message = fillTemplate({
+          template,
+          guestName: guest.name,
+          eventName: eventTitle,
+          eventDate: dateLabel,
+          location: locationLabel,
+          dressCode: dressCode || 'A definir',
+          inviteLink,
+        });
+
+        return {
+          guest_id: guest.id,
+          guest_name: guest.name,
+          phone: `55${phone}`,
+          invite_link: inviteLink,
+          message,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+
+    if (payloadGuests.length === 0) {
+      setBulkDispatchFeedback(
+        'Nenhum pendente com telefone/token valido para disparo em massa.'
+      );
+      return;
+    }
+
+    setIsDispatchingBulk(true);
+    setBulkDispatchFeedback(null);
+
+    try {
+      const response = await fetch(makeWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'planejar-pro',
+          event: {
+            id: event.id,
+            name: eventTitle,
+            date: dateLabel,
+            location: locationLabel,
+            dress_code: dressCode || null,
+          },
+          totals: {
+            pending_total: pendingGuests.length,
+            payload_total: payloadGuests.length,
+          },
+          guests: payloadGuests,
+          sent_at: new Date().toISOString(),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Webhook respondeu com status ${response.status}`);
+      }
+
+      await onMarkPendingReminderSent();
+
+      const skipped = Math.max(pendingGuests.length - payloadGuests.length, 0);
+      setBulkDispatchFeedback(
+        `Disparo solicitado para ${payloadGuests.length} pendente(s). Ignorados: ${skipped}.`
+      );
+    } catch (error) {
+      setBulkDispatchFeedback(
+        `Falha no disparo em massa: ${error instanceof Error ? error.message : 'erro desconhecido'}`
+      );
+    } finally {
+      setIsDispatchingBulk(false);
     }
   }
 
@@ -302,6 +404,14 @@ export function InvitesTab<TGuest extends GuestLike>({
         >
           Exportar CSV RSVP
         </button>
+        <button
+          type="button"
+          onClick={() => void dispatchBulkWhatsApp()}
+          disabled={isDispatchingBulk}
+          className="px-3 py-2 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-500 disabled:opacity-60"
+        >
+          {isDispatchingBulk ? 'Disparando...' : 'Disparo em massa (Make)'}
+        </button>
         <span className="text-xs text-gray-600">
           Pendentes sem telefone: <b>{summary.pendingWithoutPhone}</b>
         </span>
@@ -312,6 +422,9 @@ export function InvitesTab<TGuest extends GuestLike>({
         ) : (
           <span className="text-xs text-gray-400">Nenhum lembrete registrado</span>
         )}
+        {bulkDispatchFeedback ? (
+          <span className="text-xs text-gray-700">{bulkDispatchFeedback}</span>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

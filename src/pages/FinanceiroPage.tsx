@@ -1,10 +1,8 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
   Cell,
   Legend,
@@ -43,6 +41,10 @@ type FinanceEntry = {
   proof_url: string | null;
   notes: string | null;
   created_at?: string | null;
+  source_event_id?: string | null;
+  source_vendor_id?: string | null;
+  source_expense_id?: string | null;
+  source_payment_id?: string | null;
 };
 
 type FinanceExpense = {
@@ -83,11 +85,44 @@ type TeamRankingRow = {
   score: number;
 };
 
+type EventFinanceRef = {
+  id: string;
+  name: string;
+  event_date: string | null;
+  user_id: string;
+};
+
+type VendorFinanceRef = {
+  id: string;
+  event_id: string;
+  name: string;
+  category: string;
+};
+
+type ExpenseFinanceRef = {
+  id: string;
+  event_id: string;
+  name: string;
+  value: number | string | null;
+  vendor_id: string | null;
+};
+
+type PaymentFinanceRef = {
+  id: string;
+  event_id: string;
+  expense_id: string;
+  amount: number | string | null;
+  method: string | null;
+  paid_at: string | null;
+  note: string | null;
+};
+
 const currency = (value: number) =>
   value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 const RECEIVED_STATUSES = new Set(['confirmado', 'pago', 'parcelado']);
 const PLANNED_STATUSES = new Set(['pendente', 'previsto', 'parcelado']);
+const CASH_OUT_STATUSES = new Set(['confirmado', 'pago', 'parcelado']);
 
 const CATEGORY_FALLBACK_COLORS = ['#C9A46E', '#1F2937', '#9CA3AF', '#6B7280'];
 
@@ -109,6 +144,20 @@ function monthKey(date: Date) {
 
 function monthLabel(date: Date) {
   return date.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as { message?: unknown }).message === 'string'
+  ) {
+    return (error as { message: string }).message;
+  }
+  if (typeof error === 'string' && error.trim()) return error;
+  return 'erro desconhecido';
 }
 
 export function FinanceiroPage() {
@@ -162,9 +211,34 @@ export function FinanceiroPage() {
     return email.split('@')[0] || 'Assessoria/Cerimonialista';
   }
 
+  function normalizeLabel(value?: string | null) {
+    return (value ?? '').trim().toLowerCase();
+  }
+
+  function isSelfVendor(vendor: VendorFinanceRef) {
+    const expectedName = normalizeLabel(getSelfVendorName(user?.email));
+    const vendorName = normalizeLabel(vendor.name);
+    const vendorCategory = normalizeLabel(vendor.category);
+    return (
+      vendorCategory === normalizeLabel(SELF_VENDOR_CATEGORY) ||
+      vendorName === expectedName
+    );
+  }
+
+  const fetchUserEventIds = useCallback(async () => {
+    if (!user) return [] as string[];
+    const { data, error } = await supabase
+      .from('events')
+      .select('id')
+      .eq('user_id', user.id);
+    if (error) throw error;
+    return Array.from(new Set((data ?? []).map((row) => row.id)));
+  }, [user]);
+
   const loadFinance = async () => {
     if (!user) return;
     setLoading(true);
+    setActionError(null);
 
     const onboardingRes = await supabase
       .from('user_finance_onboarding')
@@ -178,12 +252,7 @@ export function FinanceiroPage() {
       .eq('user_id', user.id)
       .maybeSingle();
 
-    const eventsRes = await supabase
-      .from('events')
-      .select('id')
-      .eq('user_id', user.id);
-
-    const eventIds = (eventsRes.data ?? []).map((row) => row.id);
+    const eventIds = await fetchUserEventIds();
     setEventsCount(eventIds.length);
     let teamData: { name: string | null; role: string | null }[] = [];
 
@@ -199,8 +268,15 @@ export function FinanceiroPage() {
     }
 
     if (eventIds.length > 0) {
-      await ensureSelfVendors(eventIds);
-      await syncAssessoriaEntries(eventIds);
+      try {
+        await ensureSelfVendors(eventIds);
+        await syncAssessoriaEntries(eventIds);
+      } catch (syncError) {
+        console.error('Falha ao sincronizar financeiro por evento:', syncError);
+        setActionError(
+          `Erro ao sincronizar valores dos eventos: ${getErrorMessage(syncError)}`
+        );
+      }
     }
 
     const entriesRes = await supabase
@@ -271,7 +347,8 @@ export function FinanceiroPage() {
   };
 
   useEffect(() => {
-    loadFinance();
+    void loadFinance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   async function markOnboardingComplete() {
@@ -303,11 +380,8 @@ export function FinanceiroPage() {
       .in('event_id', eventIds);
 
     const existingByEvent = new Map<string, boolean>();
-    (vendors ?? []).forEach((vendor) => {
-      const isSelf =
-        vendor.category === SELF_VENDOR_CATEGORY ||
-        vendor.name === getSelfVendorName(user.email);
-      if (isSelf) {
+    ((vendors ?? []) as VendorFinanceRef[]).forEach((vendor) => {
+      if (isSelfVendor(vendor)) {
         existingByEvent.set(vendor.event_id, true);
       }
     });
@@ -329,55 +403,186 @@ export function FinanceiroPage() {
   async function syncAssessoriaEntries(eventIds: string[]) {
     if (!user || eventIds.length === 0) return;
 
-    const { data: vendors } = await supabase
+    const { data: eventsData, error: eventsError } = await supabase
+      .from('events')
+      .select('id, name, event_date, user_id')
+      .in('id', eventIds)
+      .eq('user_id', user.id);
+    if (eventsError) throw eventsError;
+
+    const eventsById = new Map<string, EventFinanceRef>();
+    (eventsData as EventFinanceRef[] | null)?.forEach((eventItem) => {
+      eventsById.set(eventItem.id, eventItem);
+    });
+
+    const { data: vendors, error: vendorsError } = await supabase
       .from('event_vendors')
       .select('id,event_id,category,name')
       .in('event_id', eventIds);
+    if (vendorsError) throw vendorsError;
 
-    const selfVendorIds = (vendors ?? [])
-      .filter(
-        (vendor) =>
-          vendor.category === SELF_VENDOR_CATEGORY ||
-          vendor.name === getSelfVendorName(user.email)
-      )
-      .map((vendor) => vendor.id);
+    const selfVendors = ((vendors ?? []) as VendorFinanceRef[]).filter((vendor) =>
+      isSelfVendor(vendor)
+    );
+    const selfVendorIds = selfVendors.map((vendor) => vendor.id);
 
     if (selfVendorIds.length === 0) return;
 
-    const { data: expensesData } = await supabase
+    const { data: expensesData, error: expensesError } = await supabase
       .from('event_expenses')
-      .select('id,event_id,name,value,vendor_id, events(name,event_date,user_id)')
+      .select('id,event_id,name,value,vendor_id')
       .in('vendor_id', selfVendorIds);
+    if (expensesError) throw expensesError;
 
-    const entriesPayload =
-      (expensesData ?? [])
-        .map((row) => {
-          const relatedEvent = Array.isArray(row.events)
-            ? row.events[0]
-            : row.events;
-          return { row, relatedEvent };
-        })
-        .filter(({ relatedEvent }) => relatedEvent?.user_id === user.id)
-        .map(({ row, relatedEvent }) => ({
-          user_id: user.id,
-          title: `Assessoria • ${relatedEvent?.name ?? row.name ?? 'Evento'}`,
-          client_name: relatedEvent?.name ?? null,
-          amount: Number(row.value) || 0,
-          status: 'previsto' as const,
-          expected_at: relatedEvent?.event_date ?? null,
-          payment_method: 'transferencia',
-          notes: 'Receita prevista do seu evento.',
-          source_event_id: row.event_id,
-          source_vendor_id: row.vendor_id,
-          source_expense_id: row.id,
-        }))
-        .filter((item) => Number(item.amount) > 0) ?? [];
+    const scopedExpenses = ((expensesData ?? []) as ExpenseFinanceRef[]).filter((expense) =>
+      eventsById.has(expense.event_id)
+    );
 
-    if (entriesPayload.length === 0) return;
+    if (scopedExpenses.length === 0) return;
 
-    await supabase
+    const existingPlannedRows = await supabase
       .from('user_finance_entries')
-      .upsert(entriesPayload, { onConflict: 'source_expense_id' });
+      .select('id, source_expense_id')
+      .eq('user_id', user.id)
+      .in('source_event_id', eventIds)
+      .is('source_payment_id', null)
+      .not('source_expense_id', 'is', null);
+    if (existingPlannedRows.error) throw existingPlannedRows.error;
+
+    const scopedExpenseIds = scopedExpenses.map((expense) => expense.id);
+    const stalePlannedEntryIds = (existingPlannedRows.data ?? [])
+      .filter((row) => !scopedExpenseIds.includes(row.source_expense_id as string))
+      .map((row) => row.id);
+    if (stalePlannedEntryIds.length > 0) {
+      const deleteStalePlanned = await supabase
+        .from('user_finance_entries')
+        .delete()
+        .eq('user_id', user.id)
+        .in('id', stalePlannedEntryIds);
+      if (deleteStalePlanned.error) throw deleteStalePlanned.error;
+    }
+
+    const expenseIds = scopedExpenseIds;
+    const { data: paymentsData, error: paymentsError } = await supabase
+      .from('expense_payments')
+      .select('id, event_id, expense_id, amount, method, paid_at, note')
+      .in('expense_id', expenseIds);
+    if (paymentsError) throw paymentsError;
+
+    const scopedPayments = ((paymentsData ?? []) as PaymentFinanceRef[]).filter((payment) =>
+      eventsById.has(payment.event_id)
+    );
+
+    const paidByExpenseId = new Map<string, number>();
+    scopedPayments.forEach((payment) => {
+      const amount = Number(payment.amount) || 0;
+      paidByExpenseId.set(
+        payment.expense_id,
+        (paidByExpenseId.get(payment.expense_id) ?? 0) + amount
+      );
+    });
+
+    const plannedEntries = scopedExpenses
+      .map((expense) => {
+        const eventItem = eventsById.get(expense.event_id);
+        if (!eventItem) return null;
+        const total = Number(expense.value) || 0;
+        const paid = paidByExpenseId.get(expense.id) ?? 0;
+        const remaining = Math.max(total - paid, 0);
+        if (remaining <= 0) return null;
+        return {
+          user_id: user.id,
+          title: `A receber • ${eventItem.name ?? expense.name ?? 'Evento'}`,
+          client_name: eventItem.name ?? null,
+          amount: remaining,
+          status: 'previsto' as const,
+          expected_at: eventItem.event_date ?? null,
+          received_at: null,
+          payment_method: null,
+          notes: 'Valor em aberto da assessoria no evento.',
+          source_event_id: expense.event_id,
+          source_vendor_id: expense.vendor_id,
+          source_expense_id: expense.id,
+          source_payment_id: null,
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+    const clearPlanned = await supabase
+      .from('user_finance_entries')
+      .delete()
+      .eq('user_id', user.id)
+      .in('source_event_id', eventIds)
+      .is('source_payment_id', null)
+      .not('source_expense_id', 'is', null);
+    if (clearPlanned.error) throw clearPlanned.error;
+
+    if (plannedEntries.length > 0) {
+      const plannedInsert = await supabase
+        .from('user_finance_entries')
+        .insert(plannedEntries);
+      if (plannedInsert.error) throw plannedInsert.error;
+    }
+
+    const plannedSourceIds = plannedEntries.map((entry) => entry.source_expense_id);
+    const paidExpenseIds = scopedExpenses
+      .filter((expense) => (paidByExpenseId.get(expense.id) ?? 0) > 0)
+      .map((expense) => expense.id);
+    const fullyPaidSourceIds = paidExpenseIds.filter(
+      (expenseId) => !plannedSourceIds.includes(expenseId)
+    );
+    if (fullyPaidSourceIds.length > 0) {
+      const deletePlanned = await supabase
+        .from('user_finance_entries')
+        .delete()
+        .eq('user_id', user.id)
+        .in('source_expense_id', fullyPaidSourceIds)
+        .is('source_payment_id', null);
+      if (deletePlanned.error) throw deletePlanned.error;
+    }
+
+    const paymentEntries = scopedPayments
+      .map((payment) => {
+        const relatedExpense = scopedExpenses.find(
+          (expense) => expense.id === payment.expense_id
+        );
+        if (!relatedExpense) return null;
+        const eventItem = eventsById.get(payment.event_id);
+        if (!eventItem) return null;
+        const amount = Number(payment.amount) || 0;
+        if (amount <= 0) return null;
+        return {
+          user_id: user.id,
+          title: `Recebimento • ${eventItem.name ?? relatedExpense.name ?? 'Evento'}`,
+          client_name: eventItem.name ?? null,
+          amount,
+          status: 'pago' as const,
+          expected_at: null,
+          received_at: payment.paid_at ?? null,
+          payment_method: payment.method ?? null,
+          notes: payment.note ?? 'Pagamento da assessoria no evento.',
+          source_event_id: payment.event_id,
+          source_vendor_id: relatedExpense.vendor_id,
+          source_expense_id: payment.expense_id,
+          source_payment_id: payment.id,
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+    const clearPayments = await supabase
+      .from('user_finance_entries')
+      .delete()
+      .eq('user_id', user.id)
+      .in('source_event_id', eventIds)
+      .not('source_payment_id', 'is', null);
+    if (clearPayments.error) throw clearPayments.error;
+
+    if (paymentEntries.length > 0) {
+      const paymentInsert = await supabase
+        .from('user_finance_entries')
+        .insert(paymentEntries);
+      if (paymentInsert.error) throw paymentInsert.error;
+    }
   }
 
   async function uploadProof(file: File, kind: 'entries' | 'expenses') {
@@ -411,7 +616,7 @@ export function FinanceiroPage() {
         throw error ?? new Error('Sem URL assinada');
       }
       window.open(data.signedUrl, '_blank', 'noopener');
-    } catch (err) {
+    } catch {
       setActionError('Nao foi possivel abrir o comprovante.');
     } finally {
       setOpeningProofId(null);
@@ -457,7 +662,7 @@ export function FinanceiroPage() {
       });
       setEntryProof(null);
       await loadFinance();
-    } catch (err) {
+    } catch {
       setActionError('Nao foi possivel salvar a entrada.');
     } finally {
       setSavingEntry(false);
@@ -508,7 +713,7 @@ export function FinanceiroPage() {
       });
       setExpenseProof(null);
       await loadFinance();
-    } catch (err) {
+    } catch {
       setActionError('Nao foi possivel salvar a saida.');
     } finally {
       setSavingExpense(false);
@@ -553,35 +758,6 @@ export function FinanceiroPage() {
 
     return months;
   }, [entries, expenses]);
-
-  const paymentSchedule = useMemo(() => {
-    const upcoming = new Map<string, { name: string; recebido: number; previsto: number }>();
-    const today = new Date();
-    const end = new Date(today.getTime() + 21 * 24 * 60 * 60 * 1000);
-
-    entries.forEach((entry) => {
-      const date = parseDate(entry.expected_at ?? entry.received_at);
-      if (!date) return;
-      if (date < today || date > end) return;
-      const key = date.toISOString().slice(0, 10);
-      const label = formatShortDate(key);
-      if (!upcoming.has(key)) {
-        upcoming.set(key, { name: label, recebido: 0, previsto: 0 });
-      }
-      const row = upcoming.get(key)!;
-      const amount = Number(entry.amount) || 0;
-      if (RECEIVED_STATUSES.has(entry.status)) {
-        row.recebido += amount;
-      } else {
-        row.previsto += amount;
-      }
-    });
-
-    return Array.from(upcoming.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .slice(0, 6)
-      .map(([, row]) => row);
-  }, [entries]);
 
   const categorySplit = useMemo(() => {
     const categoryMap = new Map<string, { name: string; value: number }>();
@@ -644,8 +820,12 @@ export function FinanceiroPage() {
   }, [entries, expenses]);
 
   const stats = useMemo(() => {
-    const totalEntries = entries.reduce((acc, entry) => acc + (Number(entry.amount) || 0), 0);
-    const totalExpenses = expenses.reduce((acc, expense) => acc + (Number(expense.amount) || 0), 0);
+    const settledEntries = entries
+      .filter((entry) => RECEIVED_STATUSES.has(entry.status))
+      .reduce((acc, entry) => acc + (Number(entry.amount) || 0), 0);
+    const settledExpenses = expenses
+      .filter((expense) => CASH_OUT_STATUSES.has(expense.status))
+      .reduce((acc, expense) => acc + (Number(expense.amount) || 0), 0);
     const confirmedEntries = entries
       .filter((entry) => RECEIVED_STATUSES.has(entry.status))
       .reduce((acc, entry) => acc + (Number(entry.amount) || 0), 0);
@@ -654,7 +834,7 @@ export function FinanceiroPage() {
       .reduce((acc, expense) => acc + (Number(expense.amount) || 0), 0);
 
     return {
-      balance: baseBalance + totalEntries - totalExpenses,
+      balance: baseBalance + settledEntries - settledExpenses,
       confirmedEntries,
       plannedEntries: entries
         .filter((entry) => PLANNED_STATUSES.has(entry.status))
@@ -878,23 +1058,22 @@ export function FinanceiroPage() {
                           type="button"
                           onClick={async () => {
                             setIsSyncingEvents(true);
-                            await ensureSelfVendors(
-                              Array.from(new Set((await supabase
-                                .from('events')
-                                .select('id')
-                                .eq('user_id', user?.id ?? '')
-                              ).data?.map((row) => row.id) ?? []))
-                            );
-                            await syncAssessoriaEntries(
-                              Array.from(new Set((await supabase
-                                .from('events')
-                                .select('id')
-                                .eq('user_id', user?.id ?? '')
-                              ).data?.map((row) => row.id) ?? []))
-                            );
-                            await loadFinance();
-                            setIsSyncingEvents(false);
-                            await markOnboardingComplete();
+                            try {
+                              const userEventIds = await fetchUserEventIds();
+                              await ensureSelfVendors(userEventIds);
+                              await syncAssessoriaEntries(userEventIds);
+                              await loadFinance();
+                              await markOnboardingComplete();
+                            } catch (error) {
+                              console.error('Erro ao contabilizar eventos:', error);
+                              setActionError(
+                                `Nao foi possivel sincronizar os eventos agora: ${getErrorMessage(
+                                  error
+                                )}`
+                              );
+                            } finally {
+                              setIsSyncingEvents(false);
+                            }
                           }}
                           disabled={isSyncingEvents}
                           className="px-6 py-3 bg-gold-500 hover:bg-gold-600 text-white font-bold rounded-xl shadow-lg hover:shadow-gold-500/30 transition-all"
@@ -954,6 +1133,11 @@ export function FinanceiroPage() {
               </button>
             </div>
           </div>
+          {actionError ? (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {actionError}
+            </div>
+          ) : null}
 
           {formTab === 'entradas' ? (
             <form className="grid grid-cols-1 md:grid-cols-2 gap-4" onSubmit={handleCreateEntry}>
@@ -1130,8 +1314,8 @@ export function FinanceiroPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-8">
-        <div className="lg:col-span-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+      <div className="grid grid-cols-1 gap-6 mb-8">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-lg font-bold text-gray-900">Fluxo de caixa</h2>
@@ -1188,39 +1372,6 @@ export function FinanceiroPage() {
           </div>
         </div>
 
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-lg font-bold text-gray-900">
-                Recebimentos previstos
-              </h2>
-              <p className="text-sm text-gray-500">
-                Proximas entradas confirmadas.
-              </p>
-            </div>
-            <span className="text-xs font-semibold px-3 py-1 rounded-full bg-emerald-50 text-emerald-700">
-              21 dias
-            </span>
-          </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={paymentSchedule} barSize={14}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-                <XAxis dataKey="name" tickLine={false} axisLine={false} />
-                <YAxis tickLine={false} axisLine={false} />
-                <Tooltip
-                  formatter={(value: number | undefined) =>
-                    currency(Number(value) || 0)
-                  }
-                  contentStyle={{ borderRadius: 12 }}
-                />
-                <Legend />
-                <Bar dataKey="previsto" fill="#CBD5F5" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="recebido" fill="#10B981" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">

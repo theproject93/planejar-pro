@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -115,7 +115,7 @@ export function EventCommandCenterPage() {
   const [tourStep, setTourStep] = useState(0);
   const [tourOpen, setTourOpen] = useState(false);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!eventId || !user) return;
     setLoading(true);
 
@@ -174,11 +174,12 @@ export function EventCommandCenterPage() {
       setTourStep(0);
       localStorage.setItem(key, 'seen');
     }
-  };
+  }, [eventId, user]);
 
   useEffect(() => {
-    loadData();
-  }, [eventId, user]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadData();
+  }, [loadData]);
 
   const latestStatus = useMemo(() => {
     const map = new Map<string, StatusRow>();

@@ -29,6 +29,8 @@ type VendorBase = {
   phone?: string | null;
   email?: string | null;
   status: VendorStatus;
+  expected_arrival_time?: string | null;
+  expected_done_time?: string | null;
 };
 
 type ExpenseBase = {
@@ -49,6 +51,8 @@ type NewVendorBase = {
   category: string;
   phone: string;
   email: string;
+  expected_arrival_time?: string;
+  expected_done_time?: string;
 };
 
 type Props<
@@ -72,6 +76,10 @@ type Props<
   onGoToVendorExpenses: (vendorId: string) => void;
   onGoToVendorDocuments?: (vendorId: string) => void;
   paymentReceiptCountByVendor?: ReadonlyMap<string, number>;
+  onScheduleChange?: (
+    id: string,
+    patch: { expected_arrival_time?: string | null; expected_done_time?: string | null }
+  ) => void | Promise<void>;
 
   // UX premium
   isBusy?: boolean;
@@ -204,6 +212,7 @@ export function VendorsTab<
   onGoToVendorExpenses,
   onGoToVendorDocuments,
   paymentReceiptCountByVendor,
+  onScheduleChange,
   isBusy = false,
   busyText = 'Aguarde…',
 }: Props<TVendor, TNewVendor, TExpense, TPayment>) {
@@ -346,6 +355,34 @@ export function VendorsTab<
           disabled={blocking}
         />
 
+        <input
+          type="time"
+          value={newVendor.expected_arrival_time ?? ''}
+          onChange={(e) =>
+            setNewVendor((p) => ({
+              ...p,
+              expected_arrival_time: e.target.value,
+            }))
+          }
+          placeholder="Chegada"
+          className="md:col-span-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+          disabled={blocking}
+        />
+
+        <input
+          type="time"
+          value={newVendor.expected_done_time ?? ''}
+          onChange={(e) =>
+            setNewVendor((p) => ({
+              ...p,
+              expected_done_time: e.target.value,
+            }))
+          }
+          placeholder="Finalizacao"
+          className="md:col-span-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+          disabled={blocking}
+        />
+
         <button
           onClick={addVendorSafe}
           disabled={blocking}
@@ -439,6 +476,37 @@ export function VendorsTab<
                       {v.email}
                     </span>
                   )}
+                </div>
+
+                <div className="flex items-center gap-3 mt-2 text-xs text-gray-600">
+                  <label className="flex items-center gap-2">
+                    Chegada
+                    <input
+                      type="time"
+                      value={v.expected_arrival_time ?? ''}
+                      onChange={(e) => {
+                        const value = e.target.value || null;
+                        onScheduleChange?.(v.id, {
+                          expected_arrival_time: value,
+                        });
+                      }}
+                      className="px-2 py-1 border border-gray-200 rounded-lg"
+                      disabled={blocking}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2">
+                    Finalizacao
+                    <input
+                      type="time"
+                      value={v.expected_done_time ?? ''}
+                      onChange={(e) => {
+                        const value = e.target.value || null;
+                        onScheduleChange?.(v.id, { expected_done_time: value });
+                      }}
+                      className="px-2 py-1 border border-gray-200 rounded-lg"
+                      disabled={blocking}
+                    />
+                  </label>
                 </div>
 
                 {countAll > 0 && (

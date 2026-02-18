@@ -219,6 +219,8 @@ type VendorRow = {
   category: string;
   phone?: string | null;
   email?: string | null;
+  expected_arrival_time?: string | null;
+  expected_done_time?: string | null;
   status: 'pending' | 'confirmed' | 'paid' | 'cancelled';
   notes?: string | null;
   created_at?: string;
@@ -298,6 +300,15 @@ function isThisWeek(dueDate: string | null | undefined) {
   const weekFromNow = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
   const due = new Date(dueDate);
   return due > today && due <= weekFromNow;
+}
+
+function combineDateTime(dateStr: string | null | undefined, timeStr: string | null | undefined) {
+  if (!dateStr || !timeStr) return null;
+  const [hour, minute] = timeStr.split(':').map((v) => Number(v));
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  const base = new Date(dateStr);
+  base.setHours(hour, minute, 0, 0);
+  return base;
 }
 
 const PRIORITY_CONFIG = {
@@ -387,6 +398,9 @@ export function EventDetailsPage() {
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [isAddingExpense, setIsAddingExpense] = useState(false);
+  const [vendorStatuses, setVendorStatuses] = useState<
+    { vendor_id: string; status: 'pending' | 'en_route' | 'arrived' | 'done'; created_at: string }[]
+  >([]);
 
   const [guests, setGuests] = useState<GuestRow[]>([]);
   const [timeline, setTimeline] = useState<TimelineRow[]>([]);
@@ -453,6 +467,8 @@ export function EventDetailsPage() {
     category: '',
     phone: '',
     email: '',
+    expected_arrival_time: '',
+    expected_done_time: '',
   });
 
   const [newNote, setNewNote] = useState('');
@@ -608,6 +624,50 @@ export function EventDetailsPage() {
     confirmedGuests,
   ]);
 
+  const latestVendorStatus = useMemo(() => {
+    const map = new Map<
+      string,
+      { status: 'pending' | 'en_route' | 'arrived' | 'done'; created_at: string }
+    >();
+    vendorStatuses.forEach((row) => {
+      if (!map.has(row.vendor_id)) {
+        map.set(row.vendor_id, row);
+      }
+    });
+    return map;
+  }, [vendorStatuses]);
+
+  const vendorChecklist = useMemo(() => {
+    if (!event?.event_date) return [];
+    const now = new Date();
+    return vendors.map((vendor) => {
+      const status = latestVendorStatus.get(vendor.id)?.status ?? 'pending';
+      const expectedArrival = combineDateTime(
+        event.event_date,
+        vendor.expected_arrival_time ?? null
+      );
+      const expectedDone = combineDateTime(
+        event.event_date,
+        vendor.expected_done_time ?? null
+      );
+      const arrivalOverdue =
+        expectedArrival && now > expectedArrival && status !== 'arrived' && status !== 'done';
+      const doneOverdue =
+        expectedDone && now > expectedDone && status !== 'done';
+
+      return {
+        id: vendor.id,
+        name: vendor.name,
+        category: vendor.category,
+        status,
+        expectedArrival,
+        expectedDone,
+        arrivalOverdue,
+        doneOverdue,
+      };
+    });
+  }, [vendors, latestVendorStatus, event?.event_date]);
+
   // --------------------
   // Load
   // --------------------
@@ -638,6 +698,7 @@ export function EventDetailsPage() {
           guestsRes,
           timelineRes,
           vendorsRes,
+          vendorStatusRes,
           docsRes,
           notesRes,
           teamRes,
@@ -682,6 +743,11 @@ export function EventDetailsPage() {
             .eq('event_id', eventId)
             .order('created_at', { ascending: true }),
           supabase
+            .from('event_vendor_status')
+            .select('vendor_id, status, created_at')
+            .eq('event_id', eventId)
+            .order('created_at', { ascending: false }),
+          supabase
             .from(T_DOCUMENTS)
             .select('*')
             .eq('event_id', eventId)
@@ -710,6 +776,7 @@ export function EventDetailsPage() {
         if (guestsRes.error) throw guestsRes.error;
         if (timelineRes.error) throw timelineRes.error;
         if (vendorsRes.error) throw vendorsRes.error;
+        if (vendorStatusRes.error) throw vendorStatusRes.error;
         if (docsRes.error) throw docsRes.error;
         if (notesRes.error) throw notesRes.error;
         if (teamRes.error) throw teamRes.error;
@@ -770,6 +837,7 @@ export function EventDetailsPage() {
         setGuests((guestsRes.data as GuestRow[]) ?? []);
         setTimeline((timelineRes.data as TimelineRow[]) ?? []);
         setVendors((vendorsRes.data as VendorRow[]) ?? []);
+        setVendorStatuses((vendorStatusRes.data as any[]) ?? []);
         setDocuments((docsRes.data as DocumentRow[]) ?? []);
         setNotes((notesRes.data as NoteRow[]) ?? []);
         setTeam((teamRes.data as TeamMemberRow[]) ?? []);
@@ -1397,6 +1465,8 @@ export function EventDetailsPage() {
           category: category.trim(),
           phone: phone.trim() || null,
           email: email.trim() || null,
+          expected_arrival_time: newVendor.expected_arrival_time || null,
+          expected_done_time: newVendor.expected_done_time || null,
           status: 'pending',
         })
         .select('*')
@@ -1405,7 +1475,14 @@ export function EventDetailsPage() {
       if (res.error) throw res.error;
 
       setVendors((prev) => [...prev, res.data as VendorRow]);
-      setNewVendor({ name: '', category: '', phone: '', email: '' });
+      setNewVendor({
+        name: '',
+        category: '',
+        phone: '',
+        email: '',
+        expected_arrival_time: '',
+        expected_done_time: '',
+      });
     } catch (err: any) {
       setErrorMsg(err?.message ?? 'Erro ao criar fornecedor.');
     }
@@ -1424,6 +1501,25 @@ export function EventDetailsPage() {
       );
     } catch (err: any) {
       setErrorMsg(err?.message ?? 'Erro ao atualizar fornecedor.');
+    }
+  }
+
+  async function updateVendorSchedule(
+    id: string,
+    patch: { expected_arrival_time?: string | null; expected_done_time?: string | null }
+  ) {
+    try {
+      const res = await supabase
+        .from(T_VENDORS)
+        .update(patch)
+        .eq('id', id);
+      if (res.error) throw res.error;
+
+      setVendors((prev) =>
+        prev.map((v) => (v.id === id ? { ...v, ...patch } : v))
+      );
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao atualizar horarios do fornecedor.');
     }
   }
 
@@ -2184,6 +2280,7 @@ export function EventDetailsPage() {
             payments={payments}
             onStatusChange={updateVendorStatus}
             onDelete={deleteVendor}
+            onScheduleChange={updateVendorSchedule}
             onGoToVendorExpenses={goToBudgetFilteredByVendor}
             onGoToVendorDocuments={goToDocumentsFilteredByVendor}
             paymentReceiptCountByVendor={paymentReceiptCountByVendor}
@@ -2204,13 +2301,78 @@ export function EventDetailsPage() {
         )}
 
         {activeTab === 'timeline' && (
-          <TimelineTab
-            newTimelineItem={newTimelineItem}
-            setNewTimelineItem={setNewTimelineItem}
-            onAdd={addTimelineItem}
-            timeline={timeline}
-            onDelete={deleteTimelineItem}
-          />
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">
+                    Checklist automático (Fornecedores)
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Baseado nos horários definidos na aba Fornecedores.
+                  </p>
+                </div>
+              </div>
+
+              {vendorChecklist.length === 0 ? (
+                <p className="text-gray-500 text-sm mt-4">
+                  Nenhum fornecedor com horários cadastrados.
+                </p>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {vendorChecklist.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 rounded-lg border ${
+                        item.doneOverdue
+                          ? 'border-red-200 bg-red-50'
+                          : item.arrivalOverdue
+                            ? 'border-amber-200 bg-amber-50'
+                            : 'border-gray-100 bg-gray-50'
+                      }`}
+                    >
+                      <div>
+                        <p className="font-semibold text-gray-800">
+                          {item.name} <span className="text-xs text-gray-500">• {item.category}</span>
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Chegada: {item.expectedArrival ? item.expectedArrival.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--'}
+                          {' '}| Finalização: {item.expectedDone ? item.expectedDone.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--'}
+                        </p>
+                      </div>
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                          item.status === 'done'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : item.status === 'arrived'
+                              ? 'bg-blue-100 text-blue-700'
+                              : item.status === 'en_route'
+                                ? 'bg-indigo-100 text-indigo-700'
+                                : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
+                        {item.status === 'done'
+                          ? 'Finalizado'
+                          : item.status === 'arrived'
+                            ? 'Chegou'
+                            : item.status === 'en_route'
+                              ? 'A caminho'
+                              : 'Aguardando'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <TimelineTab
+              newTimelineItem={newTimelineItem}
+              setNewTimelineItem={setNewTimelineItem}
+              onAdd={addTimelineItem}
+              timeline={timeline}
+              onDelete={deleteTimelineItem}
+            />
+          </div>
         )}
 
         {activeTab === 'documents' && (

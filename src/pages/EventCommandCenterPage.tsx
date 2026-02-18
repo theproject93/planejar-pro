@@ -27,6 +27,8 @@ type VendorRow = {
   name: string;
   category: string;
   control_token: string | null;
+  expected_arrival_time: string | null;
+  expected_done_time: string | null;
 };
 
 type StatusRow = {
@@ -77,7 +79,7 @@ export function EventCommandCenterPage() {
           .single(),
         supabase
           .from('event_vendors')
-          .select('id, name, category, control_token')
+          .select('id, name, category, control_token, expected_arrival_time, expected_done_time')
           .eq('event_id', eventId)
           .order('created_at', { ascending: true }),
         supabase
@@ -116,13 +118,32 @@ export function EventCommandCenterPage() {
 
   const alerts = useMemo(() => {
     if (!event?.event_date) return [];
-    const today = new Date().toISOString().slice(0, 10);
-    if (event.event_date !== today) return [];
+    const now = new Date();
     return vendors
       .map((vendor) => {
         const st = latestStatus.get(vendor.id)?.status ?? 'pending';
-        if (st === 'arrived' || st === 'done') return null;
-        return `${vendor.name} ainda esta ${STATUS_LABEL[st].toLowerCase()}.`;
+        const expectedArrival = combineDateTime(
+          event.event_date,
+          vendor.expected_arrival_time
+        );
+        const expectedDone = combineDateTime(
+          event.event_date,
+          vendor.expected_done_time
+        );
+
+        if (expectedArrival && now > expectedArrival && st !== 'arrived' && st !== 'done') {
+          return `⚠ ${vendor.name} ainda não chegou (previsto ${vendor.expected_arrival_time}).`;
+        }
+
+        if (expectedDone && now > expectedDone && st !== 'done') {
+          return `⚠ ${vendor.name} ainda não finalizou (previsto ${vendor.expected_done_time}).`;
+        }
+
+        if (st === 'pending' || st === 'en_route') {
+          return `${vendor.name} está ${STATUS_LABEL[st].toLowerCase()}.`;
+        }
+
+        return null;
       })
       .filter(Boolean) as string[];
   }, [event?.event_date, vendors, latestStatus]);
@@ -227,6 +248,50 @@ export function EventCommandCenterPage() {
             ))}
           </div>
         )}
+
+        <div className="mb-8 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">Checklist automático</h2>
+              <p className="text-sm text-gray-500">
+                Horários previstos dos fornecedores.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {vendors.map((vendor) => {
+              const st = latestStatus.get(vendor.id)?.status ?? 'pending';
+              const expectedArrival = event.event_date
+                ? combineDateTime(event.event_date, vendor.expected_arrival_time)
+                : null;
+              const expectedDone = event.event_date
+                ? combineDateTime(event.event_date, vendor.expected_done_time)
+                : null;
+              return (
+                <div
+                  key={vendor.id}
+                  className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 rounded-xl bg-gray-50"
+                >
+                  <div>
+                    <p className="font-semibold text-gray-900">{vendor.name}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Chegada: {vendor.expected_arrival_time ?? '--'} • Finalização:{' '}
+                      {vendor.expected_done_time ?? '--'}
+                    </p>
+                  </div>
+                  <span
+                    className={`px-3 py-1 rounded-full text-xs font-semibold ${STATUS_COLOR[st]}`}
+                  >
+                    {STATUS_LABEL[st]}
+                  </span>
+                </div>
+              );
+            })}
+            {vendors.length === 0 && (
+              <p className="text-sm text-gray-400">Nenhum fornecedor cadastrado.</p>
+            )}
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {vendors.map((vendor, index) => {
@@ -351,4 +416,12 @@ export function EventCommandCenterPage() {
       )}
     </div>
   );
+}
+function combineDateTime(dateStr: string, timeStr: string | null) {
+  if (!timeStr) return null;
+  const [hour, minute] = timeStr.split(':').map((v) => Number(v));
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  const base = new Date(dateStr);
+  base.setHours(hour, minute, 0, 0);
+  return base;
 }

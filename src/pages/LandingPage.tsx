@@ -5,21 +5,17 @@ import {
   ArrowRight,
   Menu,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-
-const COOKIE_CONSENT_KEY = 'planejarpro_cookie_consent';
+import { useState } from 'react';
+import { acceptCookieConsent, hasCookieConsent } from '../lib/privacy';
 
 export function LandingPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [showCookieBanner, setShowCookieBanner] = useState(false);
-
-  useEffect(() => {
-    const storedConsent = localStorage.getItem(COOKIE_CONSENT_KEY);
-    setShowCookieBanner(!storedConsent);
-  }, []);
+  const [showCookieBanner, setShowCookieBanner] = useState(
+    () => !hasCookieConsent()
+  );
 
   function handleAcceptCookies() {
-    localStorage.setItem(COOKIE_CONSENT_KEY, 'accepted');
+    acceptCookieConsent();
     setShowCookieBanner(false);
   }
 

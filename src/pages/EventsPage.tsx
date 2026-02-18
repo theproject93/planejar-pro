@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import {
   Plus,
   Calendar,
@@ -62,7 +62,7 @@ export function EventsPage() {
     newEventType === 'wedding' ? 'Nome do Casal' : 'Nome do Evento';
 
   // 1. Buscar Eventos
-  async function fetchEvents() {
+  const fetchEvents = useCallback(async () => {
     if (!user) return;
 
     const { data, error } = await supabase
@@ -78,11 +78,11 @@ export function EventsPage() {
       setEvents(data || []);
     }
     setLoading(false);
-  }
+  }, [user]);
 
   useEffect(() => {
     fetchEvents();
-  }, [user]);
+  }, [fetchEvents]);
 
   // 2. Criar Evento
   const handleCreateEvent = async (e: React.FormEvent) => {
@@ -450,5 +450,4 @@ export function EventsPage() {
     </div>
   );
 }
-
 

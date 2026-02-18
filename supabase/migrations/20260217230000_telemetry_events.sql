@@ -1,4 +1,3 @@
--- Execute no Supabase SQL Editor.
 create table if not exists public.telemetry_events (
   id bigserial primary key,
   created_at timestamptz not null default now(),
@@ -29,6 +28,4 @@ revoke insert on table public.telemetry_events from anon, authenticated;
 
 drop policy if exists "authenticated_can_read_telemetry_events" on public.telemetry_events;
 drop policy if exists "anon_can_read_telemetry_events" on public.telemetry_events;
--- Intencionalmente sem policy de SELECT para anon/authenticated.
--- Leitura deve ocorrer apenas via service role (backend), que bypassa RLS.
--- Inserts devem ocorrer via função SECURITY DEFINER (ingest_telemetry_event).
+

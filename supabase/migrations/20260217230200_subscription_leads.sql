@@ -1,4 +1,3 @@
--- Execute this script in Supabase SQL Editor.
 create table if not exists public.subscription_leads (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
@@ -31,5 +30,4 @@ drop policy if exists "authenticated_can_read_subscription_leads"
   on public.subscription_leads;
 drop policy if exists "anon_can_read_subscription_leads"
   on public.subscription_leads;
--- Intencionalmente sem policy de SELECT para anon/authenticated.
--- Leitura deve ocorrer apenas via service role (backend), que bypassa RLS.
+

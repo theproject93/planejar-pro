@@ -45,3 +45,26 @@ Centralizar tarefas, convidados, mesas, orçamento e informações do evento em 
 
 ## Deploy (SPA)
 Há um `public/_redirects` para suporte a rotas SPA em hosts como Netlify. [cite:20]
+
+## Supabase (operacao)
+- Schemas de referencia:
+  - `supabase/schema_telemetry_events.sql`
+  - `supabase/schema_telemetry_intake.sql`
+  - `supabase/schema_subscription_leads.sql`
+- Migrations versionadas:
+  - `supabase/migrations/20260217230000_telemetry_events.sql`
+  - `supabase/migrations/20260217230100_telemetry_intake.sql`
+  - `supabase/migrations/20260217230200_subscription_leads.sql`
+- Edge function de telemetria:
+  - `supabase/functions/telemetry-intake/index.ts`
+
+### Deploy da Edge Function
+1) Defina seu token:
+   - PowerShell: `$env:SUPABASE_ACCESS_TOKEN="<seu_token>"`
+2) Deploy:
+   - `npx supabase functions deploy telemetry-intake --project-ref kcjpperavjuronkneezm`
+
+### Validacao rapida (telemetry-intake)
+- Requisicao valida deve retornar `200`.
+- Requisicao sem `eventName/page/sessionId` deve retornar `400`.
+- Burst de 25 requests com mesmo `sessionId` deve resultar em ~20 `200` e ~5 `429` (rate limit 20/60s).

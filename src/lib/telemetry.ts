@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { hasCookieConsent } from './privacy';
 
 const SESSION_KEY = 'planejarpro_telemetry_session_id';
 
@@ -21,18 +22,21 @@ export async function trackEvent({
   page,
   metadata = {},
 }: TrackPayload): Promise<void> {
+  if (!hasCookieConsent()) return;
+
   try {
-    await supabase.from('telemetry_events').insert({
-      event_name: eventName,
-      page,
-      session_id: getSessionId(),
-      metadata,
-      user_agent: navigator.userAgent,
-      path: window.location.pathname + window.location.search,
-      referrer: document.referrer || null,
+    await supabase.functions.invoke('telemetry-intake', {
+      body: {
+        eventName,
+        page,
+        sessionId: getSessionId(),
+        metadata,
+        userAgent: navigator.userAgent,
+        path: window.location.pathname + window.location.search,
+        referrer: document.referrer || null,
+      },
     });
   } catch (error) {
     console.warn('Falha ao registrar telemetria:', error);
   }
 }
-

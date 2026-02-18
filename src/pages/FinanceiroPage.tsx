@@ -1114,7 +1114,11 @@ export function FinanceiroPage() {
                         title="Abrir comprovante"
                         disabled={openingProofId === tx.id}
                       >
-                        <FileText className="w-4 h-4" />
+                        {openingProofId === tx.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <FileText className="w-4 h-4" />
+                        )}
                       </button>
                     ) : (
                       <span className="text-xs text-gray-300">

@@ -37,6 +37,7 @@ type StatusRow = {
   status: 'pending' | 'en_route' | 'arrived' | 'done';
   created_at: string;
   updated_by: 'assessoria' | 'fornecedor';
+  note: string | null;
 };
 
 type AlertRow = {
@@ -171,7 +172,7 @@ export function EventCommandCenterPage() {
         .order('created_at', { ascending: true }),
       supabase
         .from('event_vendor_status')
-        .select('vendor_id, status, created_at, updated_by')
+        .select('vendor_id, status, created_at, updated_by, note')
         .eq('event_id', eventId)
         .order('created_at', { ascending: false }),
       supabase
@@ -368,7 +369,7 @@ export function EventCommandCenterPage() {
     });
     const { data } = await supabase
       .from('event_vendor_status')
-      .select('vendor_id, status, created_at, updated_by')
+      .select('vendor_id, status, created_at, updated_by, note')
       .eq('event_id', eventId)
       .order('created_at', { ascending: false });
     setStatusRows((data as StatusRow[]) ?? []);
@@ -767,7 +768,8 @@ export function EventCommandCenterPage() {
         {mode === 'assessoria' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {vendors.map((vendor, index) => {
-              const current = latestStatus.get(vendor.id)?.status ?? 'pending';
+              const latestUpdate = latestStatus.get(vendor.id);
+              const current = latestUpdate?.status ?? 'pending';
               const shareUrl = vendor.control_token
                 ? `${window.location.origin}/torre/${vendor.control_token}`
                 : '';
@@ -796,6 +798,13 @@ export function EventCommandCenterPage() {
                       {STATUS_LABEL[current]}
                     </span>
                   </div>
+                  {latestUpdate && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Ultima atualizacao:{' '}
+                      {new Date(latestUpdate.created_at).toLocaleTimeString('pt-BR')}
+                      {latestUpdate.note ? ` • ${latestUpdate.note}` : ''}
+                    </p>
+                  )}
 
                   <div className={`mt-4 grid grid-cols-2 gap-2 ${highlightButtons}`}>
                     {(['en_route', 'arrived', 'done'] as StatusRow['status'][]).map((status) => (

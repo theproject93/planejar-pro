@@ -202,6 +202,8 @@ type GuestRow = {
   plus_one_count?: number | null;
   dietary_restrictions?: string | null;
   rsvp_note?: string | null;
+  invited_at?: string | null;
+  responded_at?: string | null;
   table_id?: string | null;
   invite_token?: string | null;
   created_at?: string;
@@ -1352,6 +1354,36 @@ export function EventDetailsPage() {
       setEvent((prev) => (prev ? { ...prev, ...updates } : prev));
     } catch (err: any) {
       setErrorMsg(err?.message ?? 'Erro ao salvar configuracoes de convite.');
+      throw err;
+    }
+  }
+
+  async function markPendingInviteReminderSent() {
+    const pendingGuestIds = guests
+      .filter((guest) => normalizeGuestRsvpStatus(guest) === 'pending')
+      .map((guest) => guest.id);
+
+    if (pendingGuestIds.length === 0) return;
+
+    const nowIso = new Date().toISOString();
+    setErrorMsg(null);
+
+    try {
+      const res = await supabase
+        .from(T_GUESTS)
+        .update({ invited_at: nowIso })
+        .in('id', pendingGuestIds);
+      if (res.error) throw res.error;
+
+      setGuests((prev) =>
+        prev.map((guest) =>
+          pendingGuestIds.includes(guest.id)
+            ? { ...guest, invited_at: nowIso }
+            : guest
+        )
+      );
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao registrar lembrete de convite.');
       throw err;
     }
   }
@@ -2720,6 +2752,7 @@ export function EventDetailsPage() {
             guests={guests}
             baseInviteUrl={`${window.location.origin}/convite`}
             onUpdateInviteSettings={updateInviteSettings}
+            onMarkPendingReminderSent={markPendingInviteReminderSent}
           />
         )}
 

@@ -20,6 +20,8 @@ type GuestLike = {
   phone?: string | null;
   invite_token?: string | null;
   rsvp_status?: GuestStatus | null;
+  invited_at?: string | null;
+  responded_at?: string | null;
 };
 
 type Props<TGuest extends GuestLike> = {
@@ -30,6 +32,7 @@ type Props<TGuest extends GuestLike> = {
     invite_message_template: string;
     invite_dress_code: string;
   }) => void | Promise<void>;
+  onMarkPendingReminderSent: () => void | Promise<void>;
 };
 
 const DEFAULT_TEMPLATE =
@@ -89,6 +92,7 @@ export function InvitesTab<TGuest extends GuestLike>({
   guests,
   baseInviteUrl,
   onUpdateInviteSettings,
+  onMarkPendingReminderSent,
 }: Props<TGuest>) {
   const eventTitle = useMemo(() => event.couple || event.name, [event.couple, event.name]);
 
@@ -104,22 +108,41 @@ export function InvitesTab<TGuest extends GuestLike>({
   );
   const [dressCode, setDressCode] = useState((event.invite_dress_code ?? '').trim());
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isMarkingReminder, setIsMarkingReminder] = useState(false);
   const [copiedGuestId, setCopiedGuestId] = useState<string | null>(null);
+  const [copiedReport, setCopiedReport] = useState(false);
 
   const summary = useMemo(() => {
     let confirmed = 0;
     let declined = 0;
     let pending = 0;
+    let pendingWithoutPhone = 0;
+    let lastReminderAt: string | null = null;
 
     for (const guest of guests) {
       const status = normalizeStatus(guest.rsvp_status);
       if (status === 'confirmed') confirmed += 1;
       else if (status === 'declined') declined += 1;
-      else pending += 1;
+      else {
+        pending += 1;
+        const phone = (guest.phone ?? '').replace(/\D/g, '');
+        if (phone.length < 10) pendingWithoutPhone += 1;
+      }
+
+      if (guest.invited_at) {
+        if (!lastReminderAt || new Date(guest.invited_at) > new Date(lastReminderAt)) {
+          lastReminderAt = guest.invited_at;
+        }
+      }
     }
 
-    return { confirmed, declined, pending };
+    return { confirmed, declined, pending, pendingWithoutPhone, lastReminderAt };
   }, [guests]);
+
+  const responseRate = useMemo(() => {
+    if (guests.length === 0) return 0;
+    return Math.round(((summary.confirmed + summary.declined) / guests.length) * 100);
+  }, [guests.length, summary.confirmed, summary.declined]);
 
   async function handleSaveSettings() {
     if (isSavingSettings) return;
@@ -141,6 +164,39 @@ export function InvitesTab<TGuest extends GuestLike>({
     window.setTimeout(() => setCopiedGuestId((prev) => (prev === guest.id ? null : prev)), 1500);
   }
 
+  async function copyRsvpReport() {
+    const lines = [
+      `RSVP - ${eventTitle}`,
+      `Total convidados: ${guests.length}`,
+      `Confirmados: ${summary.confirmed}`,
+      `Pendentes: ${summary.pending}`,
+      `Recusados: ${summary.declined}`,
+      `Taxa de resposta: ${responseRate}%`,
+    ];
+
+    if (summary.pending > 0) {
+      const pendingNames = guests
+        .filter((guest) => normalizeStatus(guest.rsvp_status) === 'pending')
+        .map((guest) => guest.name)
+        .slice(0, 15);
+      lines.push(`Pendentes (amostra): ${pendingNames.join(', ')}`);
+    }
+
+    await navigator.clipboard.writeText(lines.join('\n'));
+    setCopiedReport(true);
+    window.setTimeout(() => setCopiedReport(false), 1500);
+  }
+
+  async function handleMarkReminder() {
+    if (isMarkingReminder) return;
+    setIsMarkingReminder(true);
+    try {
+      await onMarkPendingReminderSent();
+    } finally {
+      setIsMarkingReminder(false);
+    }
+  }
+
   return (
     <div className="bg-white rounded-xl shadow-sm p-6">
       <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -158,6 +214,37 @@ export function InvitesTab<TGuest extends GuestLike>({
         <span className="text-xs px-2 py-1 rounded-full border bg-rose-50 text-rose-700 border-rose-200">
           Recusados: {summary.declined}
         </span>
+        <span className="text-xs px-2 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200">
+          Taxa de resposta: {responseRate}%
+        </span>
+      </div>
+
+      <div className="mb-6 p-3 rounded-lg border border-gray-200 bg-gray-50 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void handleMarkReminder()}
+          disabled={isMarkingReminder || summary.pending === 0}
+          className="px-3 py-2 rounded-lg bg-gray-900 text-white text-xs font-semibold hover:bg-gray-800 disabled:opacity-60"
+        >
+          {isMarkingReminder ? 'Registrando...' : 'Registrar lembrete para pendentes'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void copyRsvpReport()}
+          className="px-3 py-2 rounded-lg border border-gray-300 text-xs font-semibold hover:bg-white"
+        >
+          {copiedReport ? 'Relatório copiado' : 'Copiar relatório RSVP'}
+        </button>
+        <span className="text-xs text-gray-600">
+          Pendentes sem telefone: <b>{summary.pendingWithoutPhone}</b>
+        </span>
+        {summary.lastReminderAt ? (
+          <span className="text-xs text-gray-500">
+            Último lembrete: {new Date(summary.lastReminderAt).toLocaleString('pt-BR')}
+          </span>
+        ) : (
+          <span className="text-xs text-gray-400">Nenhum lembrete registrado</span>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -277,6 +364,12 @@ export function InvitesTab<TGuest extends GuestLike>({
                       <span className="text-xs text-gray-400 italic">Sem token</span>
                     )}
                   </div>
+
+                  {guest.responded_at ? (
+                    <p className="mt-2 text-[11px] text-gray-500">
+                      Respondeu em: {new Date(guest.responded_at).toLocaleString('pt-BR')}
+                    </p>
+                  ) : null}
                 </div>
               );
             })}

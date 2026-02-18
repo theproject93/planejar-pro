@@ -8,8 +8,10 @@ import {
   Loader2,
   MapPin,
   Rocket,
+  ShieldAlert,
   ShieldCheck,
   Users,
+  Wrench,
 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
@@ -45,6 +47,29 @@ type AlertRow = {
   message: string;
   dedupe_key: string;
   created_at: string;
+};
+
+type IncidentRow = {
+  id: string;
+  event_id: string;
+  vendor_id: string | null;
+  severity: 'warning' | 'critical';
+  status: 'open' | 'resolved';
+  title: string;
+  note: string | null;
+  action_plan: string | null;
+  created_at: string;
+  resolved_at: string | null;
+  vendor:
+    | {
+        name: string;
+        category: string;
+      }
+    | {
+        name: string;
+        category: string;
+      }[]
+    | null;
 };
 
 type CommandConfig = {
@@ -103,6 +128,7 @@ export function EventCommandCenterPage() {
   const [vendors, setVendors] = useState<VendorRow[]>([]);
   const [statusRows, setStatusRows] = useState<StatusRow[]>([]);
   const [storedAlerts, setStoredAlerts] = useState<AlertRow[]>([]);
+  const [incidents, setIncidents] = useState<IncidentRow[]>([]);
   const [config, setConfig] = useState<CommandConfig>({
     lead_minutes: [60, 30, 15],
     late_grace_minutes: 10,
@@ -114,12 +140,22 @@ export function EventCommandCenterPage() {
   const [mode, setMode] = useState<'assessoria' | 'noivos'>('assessoria');
   const [tourStep, setTourStep] = useState(0);
   const [tourOpen, setTourOpen] = useState(false);
+  const [savingIncident, setSavingIncident] = useState(false);
+  const [resolvingIncidentId, setResolvingIncidentId] = useState<string | null>(null);
+  const [incidentForm, setIncidentForm] = useState({
+    vendor_id: '',
+    severity: 'warning' as 'warning' | 'critical',
+    title: '',
+    action_plan: '',
+    note: '',
+  });
 
   const loadData = useCallback(async () => {
     if (!eventId || !user) return;
     setLoading(true);
 
-    const [eventRes, vendorRes, statusRes, configRes, alertsRes] = await Promise.all([
+    const [eventRes, vendorRes, statusRes, configRes, alertsRes, incidentsRes] =
+      await Promise.all([
       supabase
         .from('events')
         .select('id, name, event_date, location')
@@ -149,12 +185,21 @@ export function EventCommandCenterPage() {
         .eq('event_id', eventId)
         .order('created_at', { ascending: false })
         .limit(20),
+      supabase
+        .from('event_command_incidents')
+        .select(
+          'id, event_id, vendor_id, severity, status, title, note, action_plan, created_at, resolved_at, vendor:event_vendors(name, category)'
+        )
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false })
+        .limit(30),
     ]);
 
     if (!eventRes.error) setEvent(eventRes.data as EventRow);
     if (!vendorRes.error) setVendors((vendorRes.data as VendorRow[]) ?? []);
     if (!statusRes.error) setStatusRows((statusRes.data as StatusRow[]) ?? []);
     if (!alertsRes.error) setStoredAlerts((alertsRes.data as AlertRow[]) ?? []);
+    if (!incidentsRes.error) setIncidents((incidentsRes.data as IncidentRow[]) ?? []);
 
     if (!configRes.error && configRes.data) {
       const loaded = configRes.data as CommandConfig;
@@ -265,6 +310,12 @@ export function EventCommandCenterPage() {
     return merged;
   }, [computedAlerts]);
 
+  const incidentStats = useMemo(() => {
+    const open = incidents.filter((incident) => incident.status === 'open').length;
+    const resolved = incidents.filter((incident) => incident.status === 'resolved').length;
+    return { open, resolved };
+  }, [incidents]);
+
   useEffect(() => {
     async function persistAlerts() {
       if (!eventId || alertsForView.length === 0) return;
@@ -346,6 +397,61 @@ export function EventCommandCenterPage() {
       late_grace_minutes: safeGrace,
     });
     setSavingConfig(false);
+  }
+
+  async function refreshIncidents() {
+    if (!eventId) return;
+    const { data } = await supabase
+      .from('event_command_incidents')
+      .select(
+        'id, event_id, vendor_id, severity, status, title, note, action_plan, created_at, resolved_at, vendor:event_vendors(name, category)'
+      )
+      .eq('event_id', eventId)
+      .order('created_at', { ascending: false })
+      .limit(30);
+    setIncidents((data as IncidentRow[]) ?? []);
+  }
+
+  async function createIncident() {
+    if (!eventId || !user) return;
+    const title = incidentForm.title.trim();
+    if (!title) return;
+
+    setSavingIncident(true);
+    await supabase.from('event_command_incidents').insert({
+      event_id: eventId,
+      vendor_id: incidentForm.vendor_id || null,
+      severity: incidentForm.severity,
+      title,
+      action_plan: incidentForm.action_plan.trim() || null,
+      note: incidentForm.note.trim() || null,
+      created_by: user.id,
+    });
+
+    setIncidentForm({
+      vendor_id: '',
+      severity: 'warning',
+      title: '',
+      action_plan: '',
+      note: '',
+    });
+    setSavingIncident(false);
+    await refreshIncidents();
+  }
+
+  async function resolveIncident(incidentId: string) {
+    if (!user) return;
+    setResolvingIncidentId(incidentId);
+    await supabase
+      .from('event_command_incidents')
+      .update({
+        status: 'resolved',
+        resolved_at: new Date().toISOString(),
+        resolved_by: user.id,
+      })
+      .eq('id', incidentId);
+    setResolvingIncidentId(null);
+    await refreshIncidents();
   }
 
   if (loading) {
@@ -471,6 +577,152 @@ export function EventCommandCenterPage() {
                 ))}
               </div>
             )}
+
+            <div className="mb-8 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">SOS da Assessoria</h2>
+                  <p className="text-sm text-gray-500">
+                    Registre incidentes e plano de acao para resolver rapido.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 font-semibold">
+                    {incidentStats.open} abertos
+                  </span>
+                  <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 font-semibold">
+                    {incidentStats.resolved} resolvidos
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <select
+                      value={incidentForm.vendor_id}
+                      onChange={(e) =>
+                        setIncidentForm((prev) => ({ ...prev, vendor_id: e.target.value }))
+                      }
+                      className="px-3 py-2 border border-gray-300 rounded-lg"
+                    >
+                      <option value="">Fornecedor (opcional)</option>
+                      {vendors.map((vendor) => (
+                        <option key={vendor.id} value={vendor.id}>
+                          {vendor.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={incidentForm.severity}
+                      onChange={(e) =>
+                        setIncidentForm((prev) => ({
+                          ...prev,
+                          severity: e.target.value as 'warning' | 'critical',
+                        }))
+                      }
+                      className="px-3 py-2 border border-gray-300 rounded-lg"
+                    >
+                      <option value="warning">Warning</option>
+                      <option value="critical">Critical</option>
+                    </select>
+                  </div>
+                  <input
+                    value={incidentForm.title}
+                    onChange={(e) =>
+                      setIncidentForm((prev) => ({ ...prev, title: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="Titulo do incidente"
+                  />
+                  <input
+                    value={incidentForm.action_plan}
+                    onChange={(e) =>
+                      setIncidentForm((prev) => ({ ...prev, action_plan: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="Plano B / acao imediata"
+                  />
+                  <textarea
+                    value={incidentForm.note}
+                    onChange={(e) =>
+                      setIncidentForm((prev) => ({ ...prev, note: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    rows={3}
+                    placeholder="Detalhes e contexto"
+                  />
+                  <button
+                    type="button"
+                    onClick={createIncident}
+                    disabled={savingIncident || !incidentForm.title.trim()}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg disabled:opacity-60"
+                  >
+                    <ShieldAlert className="w-4 h-4" />
+                    {savingIncident ? 'Registrando...' : 'Acionar SOS'}
+                  </button>
+                </div>
+
+                <div className="space-y-3 max-h-72 overflow-auto pr-1">
+                  {incidents.length === 0 && (
+                    <p className="text-sm text-gray-400">Nenhum incidente registrado.</p>
+                  )}
+                  {incidents.map((incident) => {
+                    const vendorInfo = Array.isArray(incident.vendor)
+                      ? incident.vendor[0]
+                      : incident.vendor;
+                    return (
+                      <div
+                        key={incident.id}
+                        className={`rounded-xl border p-3 ${
+                          incident.status === 'open'
+                            ? 'border-red-200 bg-red-50/40'
+                            : 'border-emerald-200 bg-emerald-50/40'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-gray-900">{incident.title}</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {vendorInfo?.name ?? 'Sem fornecedor'} •{' '}
+                              {new Date(incident.created_at).toLocaleString('pt-BR')}
+                            </p>
+                          </div>
+                          <span className="text-[11px] px-2 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-semibold">
+                            {incident.severity}
+                          </span>
+                        </div>
+                        {incident.action_plan && (
+                          <p className="text-sm text-gray-700 mt-2 inline-flex items-center gap-1">
+                            <Wrench className="w-3.5 h-3.5" />
+                            {incident.action_plan}
+                          </p>
+                        )}
+                        {incident.note && (
+                          <p className="text-sm text-gray-600 mt-1">{incident.note}</p>
+                        )}
+                        {incident.status === 'open' ? (
+                          <button
+                            type="button"
+                            onClick={() => resolveIncident(incident.id)}
+                            disabled={resolvingIncidentId === incident.id}
+                            className="mt-3 px-3 py-1.5 text-xs rounded-lg bg-emerald-600 text-white disabled:opacity-60"
+                          >
+                            {resolvingIncidentId === incident.id
+                              ? 'Resolvendo...'
+                              : 'Marcar como resolvido'}
+                          </button>
+                        ) : (
+                          <p className="mt-3 text-xs text-emerald-700 font-semibold">
+                            Resolvido
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           </>
         )}
 

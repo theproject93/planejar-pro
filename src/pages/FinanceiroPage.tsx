@@ -114,6 +114,9 @@ export function FinanceiroPage() {
   const [expenses, setExpenses] = useState<FinanceExpense[]>([]);
   const [categories, setCategories] = useState<FinanceCategory[]>([]);
   const [teamRanking, setTeamRanking] = useState<TeamRankingRow[]>([]);
+  const [teamMembers, setTeamMembers] = useState<
+    { name: string; role: string | null }[]
+  >([]);
   const [baseBalance, setBaseBalance] = useState(0);
   const [balanceInput, setBalanceInput] = useState('0');
   const [savingBalance, setSavingBalance] = useState(false);
@@ -123,8 +126,7 @@ export function FinanceiroPage() {
     client_name: '',
     amount: '',
     status: 'confirmado' as FinanceEntry['status'],
-    received_at: '',
-    expected_at: '',
+    date: '',
     payment_method: '',
     notes: '',
   });
@@ -132,12 +134,9 @@ export function FinanceiroPage() {
     title: '',
     amount: '',
     status: 'pendente' as FinanceExpense['status'],
-    paid_at: '',
-    expected_at: '',
+    date: '',
     category_id: '',
     team_member_name: '',
-    team_member_role: '',
-    reason: '',
     payment_method: '',
     notes: '',
   });
@@ -149,88 +148,97 @@ export function FinanceiroPage() {
   const [loading, setLoading] = useState(true);
   const [openingProofId, setOpeningProofId] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadFinance() {
-      if (!user) return;
-      setLoading(true);
+  const loadFinance = async () => {
+    if (!user) return;
+    setLoading(true);
 
-      const balanceRes = await supabase
-        .from('user_finance_balance')
-        .select('base_balance')
-        .eq('user_id', user.id)
-        .maybeSingle();
+    const balanceRes = await supabase
+      .from('user_finance_balance')
+      .select('base_balance')
+      .eq('user_id', user.id)
+      .maybeSingle();
 
-      const entriesRes = await supabase
-        .from('user_finance_entries')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('received_at', { ascending: false, nullsFirst: false });
+    const entriesRes = await supabase
+      .from('user_finance_entries')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('received_at', { ascending: false, nullsFirst: false });
 
-      const expensesRes = await supabase
-        .from('user_finance_expenses')
-        .select('*, user_finance_categories(name, color)')
-        .eq('user_id', user.id)
-        .order('paid_at', { ascending: false, nullsFirst: false });
+    const expensesRes = await supabase
+      .from('user_finance_expenses')
+      .select('*, user_finance_categories(name, color)')
+      .eq('user_id', user.id)
+      .order('paid_at', { ascending: false, nullsFirst: false });
 
-      const categoriesRes = await supabase
-        .from('user_finance_categories')
-        .select('*')
-        .eq('user_id', user.id);
+    const categoriesRes = await supabase
+      .from('user_finance_categories')
+      .select('*')
+      .eq('user_id', user.id);
 
-      const eventsRes = await supabase
-        .from('events')
-        .select('id')
-        .eq('user_id', user.id);
+    const eventsRes = await supabase
+      .from('events')
+      .select('id')
+      .eq('user_id', user.id);
 
-      const eventIds = (eventsRes.data ?? []).map((row) => row.id);
-      let teamData: { name: string | null; role: string | null }[] = [];
+    const eventIds = (eventsRes.data ?? []).map((row) => row.id);
+    let teamData: { name: string | null; role: string | null }[] = [];
 
-      if (eventIds.length > 0) {
-        const teamRes = await supabase
-          .from('event_team_members')
-          .select('name, role')
-          .in('event_id', eventIds);
-        teamData = (teamRes.data ?? []) as {
-          name: string | null;
-          role: string | null;
-        }[];
-      }
-
-      if (!entriesRes.error) setEntries(entriesRes.data ?? []);
-      if (!expensesRes.error) setExpenses(expensesRes.data ?? []);
-      if (!categoriesRes.error) setCategories(categoriesRes.data ?? []);
-      if (!balanceRes.error && balanceRes.data?.base_balance != null) {
-        const balanceValue = Number(balanceRes.data.base_balance) || 0;
-        setBaseBalance(balanceValue);
-        setBalanceInput(String(balanceValue));
-      }
-
-      const rankingMap = new Map<string, { name: string; role: string | null; events: number }>();
-      teamData.forEach((member) => {
-        const name = (member.name ?? '').trim();
-        if (!name) return;
-        const role = (member.role ?? '').trim() || null;
-        const key = `${name}::${role ?? ''}`;
-        const existing = rankingMap.get(key);
-        if (existing) {
-          existing.events += 1;
-        } else {
-          rankingMap.set(key, { name, role, events: 1 });
-        }
-      });
-
-      const ranked = Array.from(rankingMap.values())
-        .sort((a, b) => b.events - a.events)
-        .slice(0, 6)
-        .map((item, index) => ({
-          ...item,
-          score: Math.min(99, 70 + item.events * 3 - index),
-        }));
-
-      setTeamRanking(ranked);
-      setLoading(false);
+    if (eventIds.length > 0) {
+      const teamRes = await supabase
+        .from('event_team_members')
+        .select('name, role')
+        .in('event_id', eventIds);
+      teamData = (teamRes.data ?? []) as {
+        name: string | null;
+        role: string | null;
+      }[];
     }
 
+    if (!entriesRes.error) setEntries(entriesRes.data ?? []);
+    if (!expensesRes.error) setExpenses(expensesRes.data ?? []);
+    if (!categoriesRes.error) setCategories(categoriesRes.data ?? []);
+    if (!balanceRes.error && balanceRes.data?.base_balance != null) {
+      const balanceValue = Number(balanceRes.data.base_balance) || 0;
+      setBaseBalance(balanceValue);
+      setBalanceInput(String(balanceValue));
+    }
+
+    const memberMap = new Map<string, { name: string; role: string | null }>();
+    const rankingMap = new Map<
+      string,
+      { name: string; role: string | null; events: number }
+    >();
+    teamData.forEach((member) => {
+      const name = (member.name ?? '').trim();
+      if (!name) return;
+      const role = (member.role ?? '').trim() || null;
+      const key = `${name}::${role ?? ''}`;
+      if (!memberMap.has(key)) {
+        memberMap.set(key, { name, role });
+      }
+      const existing = rankingMap.get(key);
+      if (existing) {
+        existing.events += 1;
+      } else {
+        rankingMap.set(key, { name, role, events: 1 });
+      }
+    });
+
+    setTeamMembers(Array.from(memberMap.values()));
+
+    const ranked = Array.from(rankingMap.values())
+      .sort((a, b) => b.events - a.events)
+      .slice(0, 6)
+      .map((item, index) => ({
+        ...item,
+        score: Math.min(99, 70 + item.events * 3 - index),
+      }));
+
+    setTeamRanking(ranked);
+    setLoading(false);
+  };
+
+  useEffect(() => {
     loadFinance();
   }, [user]);
 
@@ -288,6 +296,7 @@ export function FinanceiroPage() {
       const saved = Number(res.data?.base_balance) || 0;
       setBaseBalance(saved);
       setBalanceInput(String(saved));
+      await loadFinance();
     }
     setSavingBalance(false);
   }
@@ -303,14 +312,15 @@ export function FinanceiroPage() {
         proofUrl = await uploadProof(entryProof, 'entries');
       }
 
+      const isPlanned = entryForm.status === 'pendente' || entryForm.status === 'previsto';
       const payload = {
         user_id: user.id,
         title: entryForm.title.trim(),
         client_name: entryForm.client_name.trim() || null,
         amount: Number(entryForm.amount.replace(',', '.')) || 0,
         status: entryForm.status,
-        received_at: entryForm.received_at || null,
-        expected_at: entryForm.expected_at || null,
+        received_at: isPlanned ? null : entryForm.date || null,
+        expected_at: isPlanned ? entryForm.date || null : null,
         payment_method: entryForm.payment_method.trim() || null,
         notes: entryForm.notes.trim() || null,
         proof_url: proofUrl,
@@ -318,18 +328,17 @@ export function FinanceiroPage() {
 
       const res = await supabase.from('user_finance_entries').insert(payload).select('*');
       if (res.error) throw res.error;
-      setEntries((prev) => [...(res.data ?? []), ...prev]);
       setEntryForm({
         title: '',
         client_name: '',
         amount: '',
         status: 'confirmado',
-        received_at: '',
-        expected_at: '',
+        date: '',
         payment_method: '',
         notes: '',
       });
       setEntryProof(null);
+      await loadFinance();
     } catch (err) {
       setActionError('Nao foi possivel salvar a entrada.');
     } finally {
@@ -348,18 +357,20 @@ export function FinanceiroPage() {
         proofUrl = await uploadProof(expenseProof, 'expenses');
       }
 
+      const isPlanned = expenseForm.status === 'pendente' || expenseForm.status === 'previsto';
       const payload = {
         user_id: user.id,
         title: expenseForm.title.trim(),
         amount: Number(expenseForm.amount.replace(',', '.')) || 0,
         status: expenseForm.status,
-        paid_at: expenseForm.paid_at || null,
-        expected_at: expenseForm.expected_at || null,
+        paid_at: isPlanned ? null : expenseForm.date || null,
+        expected_at: isPlanned ? expenseForm.date || null : null,
         category_id: expenseForm.category_id || null,
         category_label: null,
         team_member_name: expenseForm.team_member_name.trim() || null,
-        team_member_role: expenseForm.team_member_role.trim() || null,
-        reason: expenseForm.reason.trim() || null,
+        team_member_role:
+          teamMembers.find((member) => member.name === expenseForm.team_member_name)
+            ?.role ?? null,
         payment_method: expenseForm.payment_method.trim() || null,
         notes: expenseForm.notes.trim() || null,
         proof_url: proofUrl,
@@ -367,21 +378,18 @@ export function FinanceiroPage() {
 
       const res = await supabase.from('user_finance_expenses').insert(payload).select('*');
       if (res.error) throw res.error;
-      setExpenses((prev) => [...(res.data ?? []), ...prev]);
       setExpenseForm({
         title: '',
         amount: '',
         status: 'pendente',
-        paid_at: '',
-        expected_at: '',
+        date: '',
         category_id: '',
         team_member_name: '',
-        team_member_role: '',
-        reason: '',
         payment_method: '',
         notes: '',
       });
       setExpenseProof(null);
+      await loadFinance();
     } catch (err) {
       setActionError('Nao foi possivel salvar a saida.');
     } finally {
@@ -752,16 +760,11 @@ export function FinanceiroPage() {
               </select>
               <input
                 type="date"
-                placeholder="Recebido em"
-                value={entryForm.received_at}
-                onChange={(e) => setEntryForm((prev) => ({ ...prev, received_at: e.target.value }))}
-                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
-              />
-              <input
-                type="date"
-                placeholder="Previsto para"
-                value={entryForm.expected_at}
-                onChange={(e) => setEntryForm((prev) => ({ ...prev, expected_at: e.target.value }))}
+                placeholder="Data"
+                value={entryForm.date}
+                onChange={(e) =>
+                  setEntryForm((prev) => ({ ...prev, date: e.target.value }))
+                }
                 className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
               />
               <input
@@ -836,39 +839,31 @@ export function FinanceiroPage() {
               </select>
               <input
                 type="date"
-                placeholder="Pago em"
-                value={expenseForm.paid_at}
-                onChange={(e) => setExpenseForm((prev) => ({ ...prev, paid_at: e.target.value }))}
+                placeholder="Data"
+                value={expenseForm.date}
+                onChange={(e) =>
+                  setExpenseForm((prev) => ({ ...prev, date: e.target.value }))
+                }
                 className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
               />
-              <input
-                type="date"
-                placeholder="Previsto para"
-                value={expenseForm.expected_at}
-                onChange={(e) => setExpenseForm((prev) => ({ ...prev, expected_at: e.target.value }))}
-                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
-              />
-              <input
-                type="text"
-                placeholder="Nome da equipe"
+              <select
                 value={expenseForm.team_member_name}
-                onChange={(e) => setExpenseForm((prev) => ({ ...prev, team_member_name: e.target.value }))}
+                onChange={(e) =>
+                  setExpenseForm((prev) => ({
+                    ...prev,
+                    team_member_name: e.target.value,
+                  }))
+                }
                 className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
-              />
-              <input
-                type="text"
-                placeholder="Cargo"
-                value={expenseForm.team_member_role}
-                onChange={(e) => setExpenseForm((prev) => ({ ...prev, team_member_role: e.target.value }))}
-                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
-              />
-              <input
-                type="text"
-                placeholder="Motivo/descricao"
-                value={expenseForm.reason}
-                onChange={(e) => setExpenseForm((prev) => ({ ...prev, reason: e.target.value }))}
-                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
-              />
+              >
+                <option value="">Nome da equipe</option>
+                {teamMembers.map((member) => (
+                  <option key={`${member.name}-${member.role ?? 'role'}`} value={member.name}>
+                    {member.name}
+                    {member.role ? ` - ${member.role}` : ''}
+                  </option>
+                ))}
+              </select>
               <input
                 type="text"
                 placeholder="Metodo de pagamento"

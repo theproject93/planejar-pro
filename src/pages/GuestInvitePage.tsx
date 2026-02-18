@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
-import { CheckCircle2, Clock3, Loader2, MapPin, Users, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock3, Loader2, MapPin, Navigation, Users, XCircle } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 
 type GuestStatus = 'pending' | 'confirmed' | 'declined';
@@ -101,6 +101,12 @@ export function GuestInvitePage() {
     return invite.couple?.trim() || invite.event_name;
   }, [invite]);
 
+  const mapsLink = !invite?.location
+    ? null
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        invite.location
+      )}`;
+
   async function submitRsvp() {
     if (!token || saving) return;
 
@@ -176,6 +182,18 @@ export function GuestInvitePage() {
               <InfoChip icon={<MapPin className="w-4 h-4" />} label={invite.location || 'Local a definir'} />
               <InfoChip icon={<Users className="w-4 h-4" />} label={invite.table_name ? `Mesa ${invite.table_name}` : 'Mesa ainda nao definida'} />
             </div>
+
+            {mapsLink ? (
+              <a
+                href={mapsLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 inline-flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500"
+              >
+                <Navigation className="w-4 h-4" />
+                Abrir rota no Google Maps
+              </a>
+            ) : null}
 
             {invite.invite_dress_code ? (
               <div className="mt-4 text-sm rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-amber-800">

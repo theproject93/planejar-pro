@@ -22,6 +22,9 @@ type GuestLike = {
   rsvp_status?: GuestStatus | null;
   invited_at?: string | null;
   responded_at?: string | null;
+  dietary_restrictions?: string | null;
+  rsvp_note?: string | null;
+  plus_one_count?: number | null;
 };
 
 type Props<TGuest extends GuestLike> = {
@@ -111,6 +114,7 @@ export function InvitesTab<TGuest extends GuestLike>({
   const [isMarkingReminder, setIsMarkingReminder] = useState(false);
   const [copiedGuestId, setCopiedGuestId] = useState<string | null>(null);
   const [copiedReport, setCopiedReport] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'all' | GuestStatus>('all');
 
   const summary = useMemo(() => {
     let confirmed = 0;
@@ -143,6 +147,13 @@ export function InvitesTab<TGuest extends GuestLike>({
     if (guests.length === 0) return 0;
     return Math.round(((summary.confirmed + summary.declined) / guests.length) * 100);
   }, [guests.length, summary.confirmed, summary.declined]);
+
+  const filteredGuests = useMemo(() => {
+    return guests.filter((guest) => {
+      if (statusFilter === 'all') return true;
+      return normalizeStatus(guest.rsvp_status) === statusFilter;
+    });
+  }, [guests, statusFilter]);
 
   async function handleSaveSettings() {
     if (isSavingSettings) return;
@@ -197,6 +208,55 @@ export function InvitesTab<TGuest extends GuestLike>({
     }
   }
 
+  function escapeCsv(value: string) {
+    if (value.includes(';') || value.includes('"') || value.includes('\n')) {
+      return `"${value.replaceAll('"', '""')}"`;
+    }
+    return value;
+  }
+
+  function exportRsvpCsv() {
+    const header = [
+      'Nome',
+      'Telefone',
+      'Status RSVP',
+      'Restricao alimentar',
+      'Observacao RSVP',
+      'Acompanhantes',
+      'Respondido em',
+      'Token',
+      'Link RSVP',
+    ];
+
+    const rows = guests.map((guest) => {
+      const token = guest.invite_token ?? '';
+      const link = token ? `${baseInviteUrl}/${token}` : '';
+      return [
+        guest.name ?? '',
+        guest.phone ?? '',
+        statusLabel(normalizeStatus(guest.rsvp_status)),
+        guest.dietary_restrictions ?? '',
+        guest.rsvp_note ?? '',
+        String(Math.max(Number(guest.plus_one_count ?? 0), 0)),
+        guest.responded_at ? new Date(guest.responded_at).toLocaleString('pt-BR') : '',
+        token,
+        link,
+      ].map((v) => escapeCsv(String(v)));
+    });
+
+    const csvContent = [header.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeEventName = eventTitle.replace(/[^a-z0-9-_]/gi, '_').toLowerCase();
+    a.href = url;
+    a.download = `rsvp_${safeEventName}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="bg-white rounded-xl shadow-sm p-6">
       <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -234,6 +294,13 @@ export function InvitesTab<TGuest extends GuestLike>({
           className="px-3 py-2 rounded-lg border border-gray-300 text-xs font-semibold hover:bg-white"
         >
           {copiedReport ? 'Relatório copiado' : 'Copiar relatório RSVP'}
+        </button>
+        <button
+          type="button"
+          onClick={exportRsvpCsv}
+          className="px-3 py-2 rounded-lg border border-gray-300 text-xs font-semibold hover:bg-white"
+        >
+          Exportar CSV RSVP
         </button>
         <span className="text-xs text-gray-600">
           Pendentes sem telefone: <b>{summary.pendingWithoutPhone}</b>
@@ -292,10 +359,22 @@ export function InvitesTab<TGuest extends GuestLike>({
         </div>
 
         <div>
-          <h4 className="font-bold text-gray-700 mb-4">Disparo por convidado</h4>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h4 className="font-bold text-gray-700">Disparo por convidado</h4>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | GuestStatus)}
+              className="text-xs border border-gray-300 rounded-lg px-2 py-1.5"
+            >
+              <option value="all">Todos</option>
+              <option value="pending">Pendentes</option>
+              <option value="confirmed">Confirmados</option>
+              <option value="declined">Recusados</option>
+            </select>
+          </div>
 
           <div className="border border-gray-200 rounded-lg overflow-hidden max-h-[560px] overflow-y-auto">
-            {guests.map((guest) => {
+            {filteredGuests.map((guest) => {
               const inviteLink = guest.invite_token
                 ? `${baseInviteUrl}/${guest.invite_token}`
                 : '';
@@ -373,6 +452,11 @@ export function InvitesTab<TGuest extends GuestLike>({
                 </div>
               );
             })}
+            {filteredGuests.length === 0 ? (
+              <div className="p-5 text-sm text-gray-400 text-center">
+                Nenhum convidado nesse filtro.
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

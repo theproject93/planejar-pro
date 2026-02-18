@@ -147,6 +147,7 @@ export function FinanceiroPage() {
   const [savingExpense, setSavingExpense] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [openingProofId, setOpeningProofId] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadFinance() {
@@ -240,10 +241,35 @@ export function FinanceiroPage() {
       .from('finance-proofs')
       .upload(path, file);
     if (uploadRes.error) throw uploadRes.error;
-    const publicUrl = supabase.storage
-      .from('finance-proofs')
-      .getPublicUrl(path).data.publicUrl;
-    return publicUrl ?? null;
+    return path;
+  }
+
+  async function openProof(proofUrl: string, id: string) {
+    setOpeningProofId(id);
+    setActionError(null);
+    try {
+      let objectPath = proofUrl;
+      if (proofUrl.startsWith('http')) {
+        const parsed = new URL(proofUrl);
+        const match = parsed.pathname.split('/finance-proofs/')[1];
+        objectPath = match ?? '';
+      }
+      if (!objectPath) {
+        window.open(proofUrl, '_blank', 'noopener');
+        return;
+      }
+      const { data, error } = await supabase.storage
+        .from('finance-proofs')
+        .createSignedUrl(objectPath, 60 * 5);
+      if (error || !data?.signedUrl) {
+        throw error ?? new Error('Sem URL assinada');
+      }
+      window.open(data.signedUrl, '_blank', 'noopener');
+    } catch (err) {
+      setActionError('Nao foi possivel abrir o comprovante.');
+    } finally {
+      setOpeningProofId(null);
+    }
   }
 
   async function handleSaveBalance() {
@@ -1081,15 +1107,15 @@ export function FinanceiroPage() {
                       {currency(tx.amount)}
                     </span>
                     {tx.proof_url ? (
-                      <a
-                        href={tx.proof_url}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => openProof(tx.proof_url ?? '', tx.id)}
                         className="text-xs text-gray-400 hover:text-gray-600"
                         title="Abrir comprovante"
+                        disabled={openingProofId === tx.id}
                       >
                         <FileText className="w-4 h-4" />
-                      </a>
+                      </button>
                     ) : (
                       <span className="text-xs text-gray-300">
                         <FileText className="w-4 h-4" />

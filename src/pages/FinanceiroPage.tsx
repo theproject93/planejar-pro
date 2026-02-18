@@ -482,6 +482,7 @@ export function FinanceiroPage() {
         type: 'Entrada' as const,
         title: entry.title,
         date: entry.received_at ?? entry.expected_at ?? entry.created_at ?? null,
+        sortKey: entry.created_at ?? entry.received_at ?? entry.expected_at ?? null,
         amount: Number(entry.amount) || 0,
         status: entry.status,
         proof_url: entry.proof_url,
@@ -491,14 +492,15 @@ export function FinanceiroPage() {
         type: 'Saida' as const,
         title: expense.title,
         date: expense.paid_at ?? expense.expected_at ?? expense.created_at ?? null,
+        sortKey: expense.created_at ?? expense.paid_at ?? expense.expected_at ?? null,
         amount: -(Number(expense.amount) || 0),
         status: expense.status,
         proof_url: expense.proof_url,
       })),
     ];
     return rows
-      .filter((row) => row.date)
-      .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
+      .filter((row) => row.date || row.sortKey)
+      .sort((a, b) => (b.sortKey ?? b.date ?? '').localeCompare(a.sortKey ?? a.date ?? ''))
       .slice(0, 6);
   }, [entries, expenses]);
 

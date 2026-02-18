@@ -226,6 +226,16 @@ type VendorRow = {
   created_at?: string;
 };
 
+type SmartTimelineSuggestion = {
+  id: string;
+  title: string;
+  reason: string;
+  activity: string;
+  time: string;
+  assignee: string;
+  priority: 'high' | 'normal';
+};
+
 type DocumentRow = {
   id: string;
   event_id: string;
@@ -309,6 +319,14 @@ function combineDateTime(dateStr: string | null | undefined, timeStr: string | n
   const base = new Date(dateStr);
   base.setHours(hour, minute, 0, 0);
   return base;
+}
+
+function normalizeText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 }
 
 const PRIORITY_CONFIG = {
@@ -546,6 +564,10 @@ export function EventDetailsPage() {
     () => guests.filter((g) => g.confirmed).length,
     [guests]
   );
+  const unconfirmedGuests = useMemo(
+    () => Math.max(guests.length - confirmedGuests, 0),
+    [guests.length, confirmedGuests]
+  );
 
   const displayName = useMemo(() => {
     const couple = (event?.couple ?? '').trim();
@@ -607,11 +629,10 @@ export function EventDetailsPage() {
         message: `Faltam ${daysRemaining} dias e ainda há ${pendingTasks.length} tarefas!`,
       });
     }
-    const unconfirmed = guests.length - confirmedGuests;
-    if (daysRemaining > 0 && daysRemaining <= 14 && unconfirmed > 10) {
+    if (daysRemaining > 0 && daysRemaining <= 14 && unconfirmedGuests > 10) {
       list.push({
         type: 'info',
-        message: `${unconfirmed} convidados ainda não confirmaram presença.`,
+        message: `${unconfirmedGuests} convidados ainda não confirmaram presença.`,
       });
     }
     return list;
@@ -620,8 +641,7 @@ export function EventDetailsPage() {
     budgetProgress,
     daysRemaining,
     pendingTasks,
-    guests.length,
-    confirmedGuests,
+    unconfirmedGuests,
   ]);
 
   const latestVendorStatus = useMemo(() => {
@@ -667,6 +687,111 @@ export function EventDetailsPage() {
       };
     });
   }, [vendors, latestVendorStatus, event?.event_date]);
+
+  const smartTimelineSuggestions = useMemo(() => {
+    const existingActivities = timeline.map((item) => normalizeText(item.activity));
+    const hasActivityLike = (needle: string) =>
+      existingActivities.some((activity) => activity.includes(normalizeText(needle)));
+
+    const missingScheduleCount = vendors.filter(
+      (vendor) => !vendor.expected_arrival_time || !vendor.expected_done_time
+    ).length;
+
+    const list: SmartTimelineSuggestion[] = [];
+
+    if (timeline.length === 0) {
+      list.push({
+        id: 'base-cerimonia',
+        title: 'Estruturar cronograma inicial',
+        reason: 'O evento ainda não possui itens no cronograma.',
+        activity: 'Cerimônia e recepção: estrutura base',
+        time: '15:00',
+        assignee: 'Assessoria',
+        priority: 'high',
+      });
+    }
+
+    if (daysRemaining > 0 && daysRemaining <= 30 && !hasActivityLike('reuniao final')) {
+      list.push({
+        id: 'reuniao-final',
+        title: 'Agendar reunião final com noivos',
+        reason: `Faltam ${daysRemaining} dias para o evento.`,
+        activity: 'Reunião final com noivos e validação de roteiro',
+        time: '10:00',
+        assignee: 'Assessoria',
+        priority: 'high',
+      });
+    }
+
+    if (daysRemaining > 0 && daysRemaining <= 14 && unconfirmedGuests > 0 && !hasActivityLike('fechamento de convidados')) {
+      list.push({
+        id: 'fechamento-convidados',
+        title: 'Fechar lista de convidados',
+        reason: `${unconfirmedGuests} convidados ainda não confirmaram presença.`,
+        activity: 'Fechamento de convidados e mesas',
+        time: '11:00',
+        assignee: 'Recepção',
+        priority: 'high',
+      });
+    }
+
+    if (missingScheduleCount > 0 && !hasActivityLike('alinhamento final de fornecedores')) {
+      list.push({
+        id: 'alinhamento-fornecedores',
+        title: 'Alinhar horários dos fornecedores',
+        reason: `${missingScheduleCount} fornecedor(es) sem horários completos.`,
+        activity: 'Alinhamento final de fornecedores',
+        time: '14:00',
+        assignee: 'Coordenação',
+        priority: 'normal',
+      });
+    }
+
+    if (overdueTasks.length > 0 && !hasActivityLike('mutirao de pendencias')) {
+      list.push({
+        id: 'mutirao-pendencias',
+        title: 'Executar mutirão de pendências',
+        reason: `${overdueTasks.length} tarefa(s) estão atrasadas.`,
+        activity: 'Mutirão de pendências críticas',
+        time: '09:00',
+        assignee: 'Equipe interna',
+        priority: 'high',
+      });
+    }
+
+    if (budgetProgress >= 85 && !hasActivityLike('revisao financeira final')) {
+      list.push({
+        id: 'revisao-financeira',
+        title: 'Fazer revisão financeira final',
+        reason: `O orçamento já está em ${budgetProgress.toFixed(0)}%.`,
+        activity: 'Revisão financeira final e ajustes de custo',
+        time: '16:00',
+        assignee: 'Financeiro',
+        priority: 'normal',
+      });
+    }
+
+    if (daysRemaining > 0 && daysRemaining <= 3 && !hasActivityLike('briefing geral da equipe')) {
+      list.push({
+        id: 'briefing-equipe',
+        title: 'Realizar briefing geral da equipe',
+        reason: `Faltam apenas ${daysRemaining} dias para o evento.`,
+        activity: 'Briefing geral da equipe operacional',
+        time: '18:00',
+        assignee: 'Assessoria',
+        priority: 'high',
+      });
+    }
+
+    return list.slice(0, 5);
+  }, [
+    timeline,
+    vendors,
+    daysRemaining,
+    unconfirmedGuests,
+    overdueTasks.length,
+    budgetProgress,
+  ]);
 
   // --------------------
   // Load
@@ -1411,30 +1536,54 @@ export function EventDetailsPage() {
   // --------------------
   // Timeline CRUD
   // --------------------
+  async function createTimelineItem(payload: {
+    time: string;
+    activity: string;
+    assignee: string;
+  }) {
+    if (!eventId) return;
+    const time = payload.time.trim();
+    const activity = payload.activity.trim();
+    if (!time || !activity) return;
+
+    const position = timeline.length;
+    const res = await supabase
+      .from(T_TIMELINE)
+      .insert({
+        event_id: eventId,
+        time,
+        activity,
+        assignee_name: payload.assignee.trim() || null,
+        position,
+      })
+      .select('*')
+      .single();
+
+    if (res.error) throw res.error;
+    setTimeline((prev) => [...prev, res.data as TimelineRow]);
+  }
+
   async function addTimelineItem() {
     const { time, activity, assignee } = newTimelineItem;
     if (!time.trim() || !activity.trim() || !eventId) return;
 
     try {
-      const position = timeline.length;
-      const res = await supabase
-        .from(T_TIMELINE)
-        .insert({
-          event_id: eventId,
-          time: time.trim(),
-          activity: activity.trim(),
-          assignee_name: assignee.trim() || null,
-          position,
-        })
-        .select('*')
-        .single();
-
-      if (res.error) throw res.error;
-
-      setTimeline((prev) => [...prev, res.data as TimelineRow]);
+      await createTimelineItem({ time, activity, assignee });
       setNewTimelineItem({ time: '', activity: '', assignee: '' });
     } catch (err: any) {
       setErrorMsg(err?.message ?? 'Erro ao criar item da timeline.');
+    }
+  }
+
+  async function applySmartTimelineSuggestion(suggestion: SmartTimelineSuggestion) {
+    try {
+      await createTimelineItem({
+        time: suggestion.time,
+        activity: suggestion.activity,
+        assignee: suggestion.assignee,
+      });
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao aplicar sugestao inteligente.');
     }
   }
 
@@ -2359,6 +2508,58 @@ export function EventDetailsPage() {
                               ? 'A caminho'
                               : 'Aguardando'}
                       </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">
+                    Linha do tempo inteligente
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Sugestões automáticas baseadas no progresso do evento.
+                  </p>
+                </div>
+                <span className="text-xs px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 font-semibold">
+                  Assistente IA
+                </span>
+              </div>
+
+              {smartTimelineSuggestions.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  Nenhuma sugestão pendente no momento.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {smartTimelineSuggestions.map((suggestion) => (
+                    <div
+                      key={suggestion.id}
+                      className="rounded-lg border border-gray-100 bg-gray-50 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">
+                          {suggestion.title}
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">{suggestion.reason}</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Sugestão: {suggestion.time} • {suggestion.activity}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => applySmartTimelineSuggestion(suggestion)}
+                        className={`px-3 py-2 text-xs rounded-lg font-semibold ${
+                          suggestion.priority === 'high'
+                            ? 'bg-indigo-600 text-white hover:bg-indigo-500'
+                            : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        Aplicar sugestão
+                      </button>
                     </div>
                   ))}
                 </div>

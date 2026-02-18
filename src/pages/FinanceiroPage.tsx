@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Area,
@@ -351,14 +351,20 @@ export function FinanceiroPage() {
 
     const entriesPayload =
       (expensesData ?? [])
-        .filter((row) => row.events?.user_id === user.id)
-        .map((row) => ({
+        .map((row) => {
+          const relatedEvent = Array.isArray(row.events)
+            ? row.events[0]
+            : row.events;
+          return { row, relatedEvent };
+        })
+        .filter(({ relatedEvent }) => relatedEvent?.user_id === user.id)
+        .map(({ row, relatedEvent }) => ({
           user_id: user.id,
-          title: `Assessoria • ${row.events?.name ?? row.name ?? 'Evento'}`,
-          client_name: row.events?.name ?? null,
+          title: `Assessoria • ${relatedEvent?.name ?? row.name ?? 'Evento'}`,
+          client_name: relatedEvent?.name ?? null,
           amount: Number(row.value) || 0,
           status: 'previsto' as const,
-          expected_at: row.events?.event_date ?? null,
+          expected_at: relatedEvent?.event_date ?? null,
           payment_method: 'transferencia',
           notes: 'Receita prevista do seu evento.',
           source_event_id: row.event_id,
@@ -800,7 +806,7 @@ export function FinanceiroPage() {
                 Que bom ter voce aqui
               </h2>
               <p className="text-sm text-gray-500 mt-1">
-                Vamos calibrar seu financeiro para começar certo.
+                Vamos calibrar seu financeiro para comeÃ§ar certo.
               </p>
             </div>
             <div className="p-8 space-y-6">
@@ -1150,7 +1156,9 @@ export function FinanceiroPage() {
                 <XAxis dataKey="name" tickLine={false} axisLine={false} />
                 <YAxis tickLine={false} axisLine={false} />
                 <Tooltip
-                  formatter={(value: number) => currency(value)}
+                  formatter={(value: number | undefined) =>
+                    currency(Number(value) || 0)
+                  }
                   contentStyle={{ borderRadius: 12 }}
                 />
                 <Legend />
@@ -1201,7 +1209,9 @@ export function FinanceiroPage() {
                 <XAxis dataKey="name" tickLine={false} axisLine={false} />
                 <YAxis tickLine={false} axisLine={false} />
                 <Tooltip
-                  formatter={(value: number) => currency(value)}
+                  formatter={(value: number | undefined) =>
+                    currency(Number(value) || 0)
+                  }
                   contentStyle={{ borderRadius: 12 }}
                 />
                 <Legend />
@@ -1247,7 +1257,11 @@ export function FinanceiroPage() {
                       />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => `${value}%`} />
+                  <Tooltip
+                    formatter={(value: number | undefined) =>
+                      `${Number(value) || 0}%`
+                    }
+                  />
                 </PieChart>
               </ResponsiveContainer>
             )}
@@ -1313,7 +1327,7 @@ export function FinanceiroPage() {
                     <div>
                       <p className="font-semibold text-gray-900">{tx.title}</p>
                       <p className="text-xs text-gray-500">
-                        {formatShortDate(tx.date)} • {tx.id.slice(0, 8)}
+                        {formatShortDate(tx.date)} â€¢ {tx.id.slice(0, 8)}
                       </p>
                     </div>
                   </div>
@@ -1434,3 +1448,5 @@ export function FinanceiroPage() {
     </div>
   );
 }
+
+

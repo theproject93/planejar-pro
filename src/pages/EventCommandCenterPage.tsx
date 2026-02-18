@@ -3,7 +3,6 @@ import { Link, useParams } from 'react-router-dom';
 import {
   AlertTriangle,
   CheckCircle2,
-  CircleDot,
   ClipboardCopy,
   Clock,
   Loader2,
@@ -38,6 +37,30 @@ type StatusRow = {
   updated_by: 'assessoria' | 'fornecedor';
 };
 
+type AlertRow = {
+  id: string;
+  vendor_id: string;
+  alert_type: 'arrival_pre_alert' | 'arrival_late' | 'done_late';
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+  dedupe_key: string;
+  created_at: string;
+};
+
+type CommandConfig = {
+  lead_minutes: number[];
+  late_grace_minutes: number;
+};
+
+type ComputedAlert = {
+  vendor_id: string;
+  alert_type: 'arrival_pre_alert' | 'arrival_late' | 'done_late';
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+  dedupe_key: string;
+  triggered_for: string | null;
+};
+
 const STATUS_LABEL: Record<StatusRow['status'], string> = {
   pending: 'Aguardando',
   en_route: 'A caminho',
@@ -52,6 +75,25 @@ const STATUS_COLOR: Record<StatusRow['status'], string> = {
   done: 'bg-gray-100 text-gray-600',
 };
 
+const ALERT_COLOR: Record<ComputedAlert['severity'], string> = {
+  info: 'border-blue-200 bg-blue-50 text-blue-800',
+  warning: 'border-amber-200 bg-amber-50 text-amber-800',
+  critical: 'border-red-200 bg-red-50 text-red-800',
+};
+
+function combineDateTime(dateStr: string, timeStr: string | null) {
+  if (!timeStr) return null;
+  const [hour, minute] = timeStr.split(':').map((v) => Number(v));
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  const base = new Date(dateStr);
+  base.setHours(hour, minute, 0, 0);
+  return base;
+}
+
+function toIsoOrNull(value: Date | null) {
+  return value ? value.toISOString() : null;
+}
+
 export function EventCommandCenterPage() {
   const { id } = useParams<{ id: string }>();
   const eventId = id ?? '';
@@ -60,49 +102,81 @@ export function EventCommandCenterPage() {
   const [event, setEvent] = useState<EventRow | null>(null);
   const [vendors, setVendors] = useState<VendorRow[]>([]);
   const [statusRows, setStatusRows] = useState<StatusRow[]>([]);
+  const [storedAlerts, setStoredAlerts] = useState<AlertRow[]>([]);
+  const [config, setConfig] = useState<CommandConfig>({
+    lead_minutes: [60, 30, 15],
+    late_grace_minutes: 10,
+  });
+  const [leadMinutesInput, setLeadMinutesInput] = useState('60,30,15');
+  const [lateGraceInput, setLateGraceInput] = useState('10');
+  const [savingConfig, setSavingConfig] = useState(false);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<'assessoria' | 'noivos'>('assessoria');
   const [tourStep, setTourStep] = useState(0);
   const [tourOpen, setTourOpen] = useState(false);
 
-  useEffect(() => {
-    async function loadData() {
-      if (!eventId || !user) return;
-      setLoading(true);
+  const loadData = async () => {
+    if (!eventId || !user) return;
+    setLoading(true);
 
-      const [eventRes, vendorRes, statusRes] = await Promise.all([
-        supabase
-          .from('events')
-          .select('id, name, event_date, location')
-          .eq('id', eventId)
-          .eq('user_id', user.id)
-          .single(),
-        supabase
-          .from('event_vendors')
-          .select('id, name, category, control_token, expected_arrival_time, expected_done_time')
-          .eq('event_id', eventId)
-          .order('created_at', { ascending: true }),
-        supabase
-          .from('event_vendor_status')
-          .select('vendor_id, status, created_at, updated_by')
-          .eq('event_id', eventId)
-          .order('created_at', { ascending: false }),
-      ]);
+    const [eventRes, vendorRes, statusRes, configRes, alertsRes] = await Promise.all([
+      supabase
+        .from('events')
+        .select('id, name, event_date, location')
+        .eq('id', eventId)
+        .eq('user_id', user.id)
+        .single(),
+      supabase
+        .from('event_vendors')
+        .select(
+          'id, name, category, control_token, expected_arrival_time, expected_done_time'
+        )
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('event_vendor_status')
+        .select('vendor_id, status, created_at, updated_by')
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('event_command_config')
+        .select('lead_minutes, late_grace_minutes')
+        .eq('event_id', eventId)
+        .maybeSingle(),
+      supabase
+        .from('event_command_alerts')
+        .select('id, vendor_id, alert_type, severity, message, dedupe_key, created_at')
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false })
+        .limit(20),
+    ]);
 
-      if (!eventRes.error) setEvent(eventRes.data as EventRow);
-      if (!vendorRes.error) setVendors((vendorRes.data as VendorRow[]) ?? []);
-      if (!statusRes.error) setStatusRows((statusRes.data as StatusRow[]) ?? []);
+    if (!eventRes.error) setEvent(eventRes.data as EventRow);
+    if (!vendorRes.error) setVendors((vendorRes.data as VendorRow[]) ?? []);
+    if (!statusRes.error) setStatusRows((statusRes.data as StatusRow[]) ?? []);
+    if (!alertsRes.error) setStoredAlerts((alertsRes.data as AlertRow[]) ?? []);
 
-      setLoading(false);
-
-      const key = `pp_torre_onboarding_${eventId}`;
-      if (!localStorage.getItem(key)) {
-        setTourOpen(true);
-        setTourStep(0);
-        localStorage.setItem(key, 'seen');
-      }
+    if (!configRes.error && configRes.data) {
+      const loaded = configRes.data as CommandConfig;
+      setConfig(loaded);
+      setLeadMinutesInput((loaded.lead_minutes ?? [60, 30, 15]).join(','));
+      setLateGraceInput(String(loaded.late_grace_minutes ?? 10));
+    } else {
+      setConfig({ lead_minutes: [60, 30, 15], late_grace_minutes: 10 });
+      setLeadMinutesInput('60,30,15');
+      setLateGraceInput('10');
     }
 
+    setLoading(false);
+    const key = `pp_torre_onboarding_${eventId}`;
+    if (!localStorage.getItem(key)) {
+      setTourOpen(true);
+      setTourStep(0);
+      localStorage.setItem(key, 'seen');
+    }
+  };
+
+  useEffect(() => {
     loadData();
   }, [eventId, user]);
 
@@ -116,37 +190,121 @@ export function EventCommandCenterPage() {
     return map;
   }, [statusRows]);
 
-  const alerts = useMemo(() => {
-    if (!event?.event_date) return [];
+  const computedAlerts = useMemo(() => {
+    if (!event?.event_date) return [] as ComputedAlert[];
     const now = new Date();
-    return vendors
-      .map((vendor) => {
-        const st = latestStatus.get(vendor.id)?.status ?? 'pending';
-        const expectedArrival = combineDateTime(
-          event.event_date,
-          vendor.expected_arrival_time
-        );
-        const expectedDone = combineDateTime(
-          event.event_date,
-          vendor.expected_done_time
-        );
+    const leadMinutes = (config.lead_minutes ?? [60, 30, 15])
+      .map((n) => Number(n))
+      .filter((n) => Number.isFinite(n) && n >= 0)
+      .sort((a, b) => b - a);
+    const lateGrace = Number(config.late_grace_minutes ?? 10);
 
-        if (expectedArrival && now > expectedArrival && st !== 'arrived' && st !== 'done') {
-          return `⚠ ${vendor.name} ainda não chegou (previsto ${vendor.expected_arrival_time}).`;
+    const out: ComputedAlert[] = [];
+    vendors.forEach((vendor) => {
+      const currentStatus = latestStatus.get(vendor.id)?.status ?? 'pending';
+      const expectedArrival = combineDateTime(event.event_date, vendor.expected_arrival_time);
+      const expectedDone = combineDateTime(event.event_date, vendor.expected_done_time);
+
+      if (expectedArrival && currentStatus !== 'arrived' && currentStatus !== 'done') {
+        leadMinutes.forEach((minutes) => {
+          const triggerAt = new Date(expectedArrival.getTime() - minutes * 60 * 1000);
+          if (now >= triggerAt && now < expectedArrival) {
+            const sev: ComputedAlert['severity'] =
+              minutes <= 15 ? 'critical' : minutes <= 30 ? 'warning' : 'info';
+            out.push({
+              vendor_id: vendor.id,
+              alert_type: 'arrival_pre_alert',
+              severity: sev,
+              message: `${vendor.name}: faltam ${minutes} min para a chegada prevista.`,
+              dedupe_key: `${event.id}:${vendor.id}:arrival_pre:${minutes}`,
+              triggered_for: toIsoOrNull(triggerAt),
+            });
+          }
+        });
+
+        const lateAt = new Date(expectedArrival.getTime() + lateGrace * 60 * 1000);
+        if (now >= lateAt) {
+          out.push({
+            vendor_id: vendor.id,
+            alert_type: 'arrival_late',
+            severity: 'critical',
+            message: `${vendor.name}: chegada atrasada (previsto ${vendor.expected_arrival_time}).`,
+            dedupe_key: `${event.id}:${vendor.id}:arrival_late`,
+            triggered_for: toIsoOrNull(lateAt),
+          });
         }
+      }
 
-        if (expectedDone && now > expectedDone && st !== 'done') {
-          return `⚠ ${vendor.name} ainda não finalizou (previsto ${vendor.expected_done_time}).`;
+      if (expectedDone && currentStatus !== 'done') {
+        const lateDoneAt = new Date(expectedDone.getTime() + lateGrace * 60 * 1000);
+        if (now >= lateDoneAt) {
+          out.push({
+            vendor_id: vendor.id,
+            alert_type: 'done_late',
+            severity: 'warning',
+            message: `${vendor.name}: finalizacao atrasada (previsto ${vendor.expected_done_time}).`,
+            dedupe_key: `${event.id}:${vendor.id}:done_late`,
+            triggered_for: toIsoOrNull(lateDoneAt),
+          });
         }
+      }
+    });
+    return out;
+  }, [event, vendors, latestStatus, config]);
 
-        if (st === 'pending' || st === 'en_route') {
-          return `${vendor.name} está ${STATUS_LABEL[st].toLowerCase()}.`;
-        }
+  const alertsForView = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: ComputedAlert[] = [];
+    computedAlerts.forEach((alert) => {
+      if (!seen.has(alert.dedupe_key)) {
+        seen.add(alert.dedupe_key);
+        merged.push(alert);
+      }
+    });
+    return merged;
+  }, [computedAlerts]);
 
-        return null;
-      })
-      .filter(Boolean) as string[];
-  }, [event?.event_date, vendors, latestStatus]);
+  useEffect(() => {
+    async function persistAlerts() {
+      if (!eventId || alertsForView.length === 0) return;
+      const existing = new Set(storedAlerts.map((a) => a.dedupe_key));
+      const toInsert = alertsForView.filter((a) => !existing.has(a.dedupe_key));
+      if (toInsert.length === 0) return;
+      await supabase.from('event_command_alerts').insert(
+        toInsert.map((a) => ({
+          event_id: eventId,
+          vendor_id: a.vendor_id,
+          alert_type: a.alert_type,
+          severity: a.severity,
+          message: a.message,
+          dedupe_key: a.dedupe_key,
+          triggered_for: a.triggered_for,
+        }))
+      );
+      const { data } = await supabase
+        .from('event_command_alerts')
+        .select('id, vendor_id, alert_type, severity, message, dedupe_key, created_at')
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      setStoredAlerts((data as AlertRow[]) ?? []);
+    }
+    persistAlerts();
+  }, [alertsForView, storedAlerts, eventId]);
+
+  const noivosStats = useMemo(() => {
+    const total = vendors.length;
+    const arrivedOrDone = vendors.filter((vendor) => {
+      const st = latestStatus.get(vendor.id)?.status ?? 'pending';
+      return st === 'arrived' || st === 'done';
+    }).length;
+    const done = vendors.filter((vendor) => {
+      const st = latestStatus.get(vendor.id)?.status ?? 'pending';
+      return st === 'done';
+    }).length;
+    const pct = total > 0 ? Math.round((arrivedOrDone / total) * 100) : 100;
+    return { total, arrivedOrDone, done, pct };
+  }, [vendors, latestStatus]);
 
   async function updateStatus(vendorId: string, status: StatusRow['status']) {
     if (!eventId) return;
@@ -162,6 +320,31 @@ export function EventCommandCenterPage() {
       .eq('event_id', eventId)
       .order('created_at', { ascending: false });
     setStatusRows((data as StatusRow[]) ?? []);
+  }
+
+  async function saveConfig() {
+    if (!eventId) return;
+    setSavingConfig(true);
+    const parsedLead = leadMinutesInput
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n >= 0);
+    const uniqueLead = Array.from(new Set(parsedLead)).sort((a, b) => b - a);
+    const grace = Number(lateGraceInput);
+    const safeGrace = Number.isFinite(grace) && grace >= 0 ? grace : 10;
+
+    await supabase.from('event_command_config').upsert({
+      event_id: eventId,
+      lead_minutes: uniqueLead.length > 0 ? uniqueLead : [60, 30, 15],
+      late_grace_minutes: safeGrace,
+      updated_at: new Date().toISOString(),
+    });
+
+    setConfig({
+      lead_minutes: uniqueLead.length > 0 ? uniqueLead : [60, 30, 15],
+      late_grace_minutes: safeGrace,
+    });
+    setSavingConfig(false);
   }
 
   if (loading) {
@@ -235,38 +418,73 @@ export function EventCommandCenterPage() {
           </div>
         </div>
 
-        {mode === 'assessoria' && alerts.length > 0 && (
-          <div className="mb-6 space-y-2">
-            {alerts.map((message) => (
-              <div
-                key={message}
-                className="flex items-center gap-2 px-4 py-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800"
-              >
-                <AlertTriangle className="w-4 h-4" />
-                {message}
+        {mode === 'assessoria' && (
+          <>
+            <div className="mb-8 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <h2 className="text-lg font-bold text-gray-900">Regras de alerta (SLA)</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Configure janelas antes do horario previsto e tolerancia de atraso.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                <div>
+                  <label className="text-xs text-gray-500">Pre-alerta (min)</label>
+                  <input
+                    value={leadMinutesInput}
+                    onChange={(e) => setLeadMinutesInput(e.target.value)}
+                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="60,30,15"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500">Tolerancia (min)</label>
+                  <input
+                    value={lateGraceInput}
+                    onChange={(e) => setLateGraceInput(e.target.value)}
+                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="10"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={saveConfig}
+                    disabled={savingConfig}
+                    className="px-4 py-2 bg-gray-900 text-white rounded-lg"
+                  >
+                    {savingConfig ? 'Salvando...' : 'Salvar regras'}
+                  </button>
+                </div>
               </div>
-            ))}
-          </div>
+            </div>
+
+            {alertsForView.length > 0 && (
+              <div className="mb-6 space-y-2">
+                {alertsForView.map((alert) => (
+                  <div
+                    key={alert.dedupe_key}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-xl border ${ALERT_COLOR[alert.severity]}`}
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                    {alert.message}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         <div className="mb-8 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-lg font-bold text-gray-900">Checklist automático</h2>
+              <h2 className="text-lg font-bold text-gray-900">Checklist automatico</h2>
               <p className="text-sm text-gray-500">
-                Horários previstos dos fornecedores.
+                Horarios previstos e status atual de cada fornecedor.
               </p>
             </div>
           </div>
           <div className="space-y-3">
             {vendors.map((vendor) => {
               const st = latestStatus.get(vendor.id)?.status ?? 'pending';
-              const expectedArrival = event.event_date
-                ? combineDateTime(event.event_date, vendor.expected_arrival_time)
-                : null;
-              const expectedDone = event.event_date
-                ? combineDateTime(event.event_date, vendor.expected_done_time)
-                : null;
               return (
                 <div
                   key={vendor.id}
@@ -275,7 +493,7 @@ export function EventCommandCenterPage() {
                   <div>
                     <p className="font-semibold text-gray-900">{vendor.name}</p>
                     <p className="text-xs text-gray-500 mt-1">
-                      Chegada: {vendor.expected_arrival_time ?? '--'} • Finalização:{' '}
+                      Chegada: {vendor.expected_arrival_time ?? '--'} • Finalizacao:{' '}
                       {vendor.expected_done_time ?? '--'}
                     </p>
                   </div>
@@ -293,43 +511,41 @@ export function EventCommandCenterPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {vendors.map((vendor, index) => {
-            const current = latestStatus.get(vendor.id)?.status ?? 'pending';
-            const shareUrl = vendor.control_token
-              ? `${window.location.origin}/torre/${vendor.control_token}`
-              : '';
-            const highlightButtons =
-              tourOpen && tourStep === 0 && index === 0
-                ? 'relative z-50 ring-4 ring-red-500 ring-offset-4'
+        {mode === 'assessoria' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {vendors.map((vendor, index) => {
+              const current = latestStatus.get(vendor.id)?.status ?? 'pending';
+              const shareUrl = vendor.control_token
+                ? `${window.location.origin}/torre/${vendor.control_token}`
                 : '';
-            const highlightShare =
-              tourOpen && tourStep === 1 && index === 0
-                ? 'relative z-50 ring-4 ring-red-500 ring-offset-4'
-                : '';
+              const highlightButtons =
+                tourOpen && tourStep === 0 && index === 0
+                  ? 'relative z-50 ring-4 ring-red-500 ring-offset-4'
+                  : '';
+              const highlightShare =
+                tourOpen && tourStep === 1 && index === 0
+                  ? 'relative z-50 ring-4 ring-red-500 ring-offset-4'
+                  : '';
 
-            return (
-              <div
-                key={vendor.id}
-                className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-900">{vendor.name}</h3>
-                    <p className="text-sm text-gray-500">{vendor.category}</p>
-                  </div>
-                  <span
-                    className={`px-3 py-1 rounded-full text-xs font-semibold ${STATUS_COLOR[current]}`}
-                  >
-                    {STATUS_LABEL[current]}
-                  </span>
-                </div>
-
+              return (
                 <div
-                  className={`mt-4 grid grid-cols-2 gap-2 ${highlightButtons}`}
+                  key={vendor.id}
+                  className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6"
                 >
-                  {(['en_route', 'arrived', 'done'] as StatusRow['status'][]).map(
-                    (status) => (
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">{vendor.name}</h3>
+                      <p className="text-sm text-gray-500">{vendor.category}</p>
+                    </div>
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-semibold ${STATUS_COLOR[current]}`}
+                    >
+                      {STATUS_LABEL[current]}
+                    </span>
+                  </div>
+
+                  <div className={`mt-4 grid grid-cols-2 gap-2 ${highlightButtons}`}>
+                    {(['en_route', 'arrived', 'done'] as StatusRow['status'][]).map((status) => (
                       <button
                         key={status}
                         type="button"
@@ -342,37 +558,80 @@ export function EventCommandCenterPage() {
                       >
                         {STATUS_LABEL[status]}
                       </button>
-                    )
+                    ))}
+                  </div>
+
+                  {shareUrl && (
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard.writeText(shareUrl)}
+                        className={`inline-flex items-center gap-2 text-xs font-semibold text-gray-600 hover:text-gray-900 ${highlightShare}`}
+                      >
+                        <ClipboardCopy className="w-4 h-4" />
+                        Copiar link do fornecedor
+                      </button>
+                    </div>
                   )}
                 </div>
-
-                {mode === 'assessoria' && shareUrl && (
-                  <div className="mt-4">
-                    <button
-                      type="button"
-                      onClick={() => navigator.clipboard.writeText(shareUrl)}
-                      className={`inline-flex items-center gap-2 text-xs font-semibold text-gray-600 hover:text-gray-900 ${highlightShare}`}
-                    >
-                      <ClipboardCopy className="w-4 h-4" />
-                      Copiar link do fornecedor
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
         {mode === 'noivos' && (
-          <div className="mt-10 bg-emerald-50 border border-emerald-100 rounded-2xl p-6 text-emerald-800">
-            <div className="flex items-center gap-2 text-lg font-semibold">
-              <ShieldCheck className="w-5 h-5" />
-              Tudo sob controle
+          <div className="space-y-6">
+            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-6 text-emerald-800">
+              <div className="flex items-center gap-2 text-lg font-semibold">
+                <ShieldCheck className="w-5 h-5" />
+                Tudo sob controle
+              </div>
+              <p className="text-sm mt-2">
+                A equipe esta cuidando de cada detalhe. O foco aqui e tranquilidade.
+              </p>
             </div>
-            <p className="text-sm mt-2">
-              O time da assessoria esta monitorando cada fornecedor. Aproveite o
-              seu momento.
-            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white border border-gray-100 rounded-2xl p-5">
+                <p className="text-xs text-gray-500">Fornecedores ativos</p>
+                <p className="text-2xl font-bold text-gray-900 mt-2">{noivosStats.total}</p>
+              </div>
+              <div className="bg-white border border-gray-100 rounded-2xl p-5">
+                <p className="text-xs text-gray-500">Ja chegaram</p>
+                <p className="text-2xl font-bold text-gray-900 mt-2">
+                  {noivosStats.arrivedOrDone}
+                </p>
+              </div>
+              <div className="bg-white border border-gray-100 rounded-2xl p-5">
+                <p className="text-xs text-gray-500">Progresso operacional</p>
+                <p className="text-2xl font-bold text-gray-900 mt-2">{noivosStats.pct}%</p>
+              </div>
+            </div>
+
+            <div className="bg-white border border-gray-100 rounded-2xl p-6">
+              <div className="flex items-center gap-2 text-gray-900 font-semibold">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                Mensagem para os noivos
+              </div>
+              <p className="text-sm text-gray-600 mt-2">
+                A producao esta sendo acompanhada em tempo real pela assessoria.
+                Aproveitem o evento.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {mode === 'assessoria' && storedAlerts.length > 0 && (
+          <div className="mt-8 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+            <h3 className="text-lg font-bold text-gray-900">Historico de alertas</h3>
+            <div className="mt-4 space-y-2">
+              {storedAlerts.slice(0, 8).map((alert) => (
+                <div key={alert.id} className="text-sm text-gray-700">
+                  <span className="font-semibold">[{alert.severity.toUpperCase()}]</span>{' '}
+                  {alert.message}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -380,7 +639,7 @@ export function EventCommandCenterPage() {
       {tourOpen && (
         <>
           <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm pointer-events-none" />
-          <div className="fixed inset-0 z-60 flex items-center justify-center p-6">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-6">
             <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6">
               <div className="flex items-center gap-2 text-lg font-bold text-gray-900">
                 <Rocket className="w-5 h-5 text-red-500" />
@@ -388,8 +647,8 @@ export function EventCommandCenterPage() {
               </div>
               <p className="text-sm text-gray-600 mt-2">
                 {tourStep === 0
-                  ? 'Use estes botoes para marcar o status de cada fornecedor em tempo real.'
-                  : 'Envie este link para o fornecedor atualizar o status sem te chamar.'}
+                  ? 'Use os botoes para atualizar status em tempo real.'
+                  : 'Compartilhe o link para o fornecedor atualizar o proprio status.'}
               </p>
               <div className="flex justify-end gap-2 mt-6">
                 {tourStep === 0 ? (
@@ -416,12 +675,4 @@ export function EventCommandCenterPage() {
       )}
     </div>
   );
-}
-function combineDateTime(dateStr: string, timeStr: string | null) {
-  if (!timeStr) return null;
-  const [hour, minute] = timeStr.split(':').map((v) => Number(v));
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-  const base = new Date(dateStr);
-  base.setHours(hour, minute, 0, 0);
-  return base;
 }

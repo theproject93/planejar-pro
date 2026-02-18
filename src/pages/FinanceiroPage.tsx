@@ -118,8 +118,6 @@ export function FinanceiroPage() {
     { name: string; role: string | null }[]
   >([]);
   const [baseBalance, setBaseBalance] = useState(0);
-  const [balanceInput, setBalanceInput] = useState('0');
-  const [savingBalance, setSavingBalance] = useState(false);
   const [formTab, setFormTab] = useState<'entradas' | 'saidas'>('saidas');
   const [entryForm, setEntryForm] = useState({
     title: '',
@@ -197,11 +195,10 @@ export function FinanceiroPage() {
     if (!entriesRes.error) setEntries(entriesRes.data ?? []);
     if (!expensesRes.error) setExpenses(expensesRes.data ?? []);
     if (!categoriesRes.error) setCategories(categoriesRes.data ?? []);
-    if (!balanceRes.error && balanceRes.data?.base_balance != null) {
-      const balanceValue = Number(balanceRes.data.base_balance) || 0;
-      setBaseBalance(balanceValue);
-      setBalanceInput(String(balanceValue));
-    }
+      if (!balanceRes.error && balanceRes.data?.base_balance != null) {
+        const balanceValue = Number(balanceRes.data.base_balance) || 0;
+        setBaseBalance(balanceValue);
+      }
 
     const memberMap = new Map<string, { name: string; role: string | null }>();
     const rankingMap = new Map<
@@ -280,26 +277,6 @@ export function FinanceiroPage() {
     }
   }
 
-  async function handleSaveBalance() {
-    if (!user) return;
-    setSavingBalance(true);
-    setActionError(null);
-    const value = Number(balanceInput.replace(',', '.')) || 0;
-    const res = await supabase
-      .from('user_finance_balance')
-      .upsert({ user_id: user.id, base_balance: value, updated_at: new Date().toISOString() })
-      .select('base_balance')
-      .maybeSingle();
-    if (res.error) {
-      setActionError('Nao foi possivel salvar o saldo.');
-    } else {
-      const saved = Number(res.data?.base_balance) || 0;
-      setBaseBalance(saved);
-      setBalanceInput(String(saved));
-      await loadFinance();
-    }
-    setSavingBalance(false);
-  }
 
   async function handleCreateEntry(e: React.FormEvent) {
     e.preventDefault();
@@ -657,36 +634,8 @@ export function FinanceiroPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-          <h2 className="text-lg font-bold text-gray-900 mb-2">
-            Ajuste de saldo em caixa
-          </h2>
-          <p className="text-sm text-gray-500 mb-4">
-            Use para registrar o saldo inicial ou correcoes pontuais.
-          </p>
-          <div className="flex items-center gap-3">
-            <input
-              type="number"
-              value={balanceInput}
-              onChange={(e) => setBalanceInput(e.target.value)}
-              className="flex-1 px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
-            />
-            <button
-              type="button"
-              onClick={handleSaveBalance}
-              disabled={savingBalance}
-              className="px-4 py-2 bg-gold-500 hover:bg-gold-600 text-white font-bold rounded-xl shadow-lg hover:shadow-gold-500/30 transition-all"
-            >
-              {savingBalance ? 'Salvando...' : 'Salvar'}
-            </button>
-          </div>
-          {actionError && (
-            <p className="text-xs text-red-600 mt-2">{actionError}</p>
-          )}
-        </div>
-
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
             <div>
               <h2 className="text-lg font-bold text-gray-900">

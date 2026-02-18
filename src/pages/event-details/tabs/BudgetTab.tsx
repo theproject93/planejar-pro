@@ -72,17 +72,24 @@ type PaymentBase = {
   note?: string | null;
 };
 
+type DocumentBase = {
+  id: string;
+  name: string;
+};
+
 type AddPaymentPayload = {
   amount: number;
   method: PaymentMethod;
   paid_at: string;
   note?: string | null;
+  installments?: number;
 };
 
 type Props<
   TExpense extends ExpenseBase,
   TNewExpense extends NewExpenseBase,
   TVendor extends VendorBase,
+  TDocument extends DocumentBase,
   TPayment extends PaymentBase,
 > = {
   vendors: TVendor[];
@@ -91,6 +98,7 @@ type Props<
   setExpenses: React.Dispatch<React.SetStateAction<TExpense[]>>;
 
   payments: TPayment[];
+  documents: TDocument[];
 
   newExpense: TNewExpense;
   setNewExpense: React.Dispatch<React.SetStateAction<TNewExpense>>;
@@ -112,6 +120,11 @@ type Props<
     payload: AddPaymentPayload
   ) => void | Promise<void>;
   deletePayment: (paymentId: string) => void | Promise<void>;
+  linkPaymentReceiptDocument: (
+    paymentId: string,
+    documentId: string | null
+  ) => void | Promise<void>;
+  goToDocument: (documentId: string) => void;
 
   totalSpent: number;
   toBRL: (value: number) => string;
@@ -208,6 +221,40 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+const PAYMENT_META_PREFIX = '[[PP_META:';
+const PAYMENT_META_SUFFIX = ']]';
+
+type PaymentMeta = {
+  installments?: number;
+  receipt_document_id?: string | null;
+};
+
+function parsePaymentNote(note: string | null | undefined): {
+  userNote: string;
+  meta: PaymentMeta;
+} {
+  const raw = (note ?? '').trim();
+  if (!raw) return { userNote: '', meta: {} };
+
+  const start = raw.lastIndexOf(PAYMENT_META_PREFIX);
+  const hasSuffix = raw.endsWith(PAYMENT_META_SUFFIX);
+  if (start < 0 || !hasSuffix) return { userNote: raw, meta: {} };
+
+  const jsonStart = start + PAYMENT_META_PREFIX.length;
+  const jsonEnd = raw.length - PAYMENT_META_SUFFIX.length;
+  const before = raw.slice(0, start).trim();
+  const json = raw.slice(jsonStart, jsonEnd).trim();
+
+  try {
+    return {
+      userNote: before,
+      meta: (JSON.parse(json) as PaymentMeta) ?? {},
+    };
+  } catch {
+    return { userNote: raw, meta: {} };
+  }
+}
+
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
@@ -236,12 +283,14 @@ export function BudgetTab<
   TExpense extends ExpenseBase,
   TNewExpense extends NewExpenseBase,
   TVendor extends VendorBase,
+  TDocument extends DocumentBase,
   TPayment extends PaymentBase,
 >({
   vendors,
   expenses,
   setExpenses,
   payments,
+  documents,
   newExpense,
   setNewExpense,
   addExpense,
@@ -249,13 +298,15 @@ export function BudgetTab<
   deleteExpense,
   addPayment,
   deletePayment,
+  linkPaymentReceiptDocument,
+  goToDocument,
   totalSpent,
   toBRL,
   vendorFilterId,
   onClearVendorFilter,
   isBusy = false,
   busyText = 'Aguarde…',
-}: Props<TExpense, TNewExpense, TVendor, TPayment>) {
+}: Props<TExpense, TNewExpense, TVendor, TDocument, TPayment>) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<{
     id: string;
@@ -333,6 +384,7 @@ export function BudgetTab<
         method: 'pix',
         paid_at: todayISO(),
         note: '',
+        installments: 1,
       }
     );
   }
@@ -374,6 +426,7 @@ export function BudgetTab<
         method: d.method,
         paid_at: d.paid_at || todayISO(),
         note: (d.note ?? '').trim() || null,
+        installments: Math.max(1, Number(d.installments || 1)),
       });
 
       setPaymentDraft((prev) => ({
@@ -383,6 +436,7 @@ export function BudgetTab<
           method: d.method,
           paid_at: d.paid_at || todayISO(),
           note: '',
+          installments: Math.max(1, Number(d.installments || 1)),
         },
       }));
     } finally {
@@ -791,6 +845,40 @@ export function BudgetTab<
                           </div>
 
                           <div className="lg:col-span-2">
+                            <label className="block text-xs text-gray-600 mb-1">
+                              Parcelas
+                            </label>
+                            <select
+                              value={Math.max(
+                                1,
+                                Number(getDraft(e.id).installments || 1)
+                              )}
+                              onChange={(ev) =>
+                                setPaymentDraft((prev) => ({
+                                  ...prev,
+                                  [e.id]: {
+                                    ...getDraft(e.id),
+                                    installments: Math.max(
+                                      1,
+                                      Number(ev.target.value || 1)
+                                    ),
+                                  },
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm"
+                              disabled={blocking || isCancelled}
+                            >
+                              {Array.from({ length: 12 }, (_, i) => i + 1).map(
+                                (n) => (
+                                  <option key={n} value={n}>
+                                    {n}x
+                                  </option>
+                                )
+                              )}
+                            </select>
+                          </div>
+
+                          <div className="lg:col-span-1">
                             <button
                               type="button"
                               onClick={() => addPaymentSafe(e.id)}
@@ -839,71 +927,113 @@ export function BudgetTab<
                             </p>
                           ) : (
                             <div className="space-y-2">
-                              {pList.map((p) => (
-                                <div
-                                  key={p.id}
-                                  className="flex items-center gap-3 p-3 rounded-lg bg-white border border-gray-200"
-                                >
-                                  <div className="text-sm font-semibold text-gray-900">
-                                    {toBRL(Number(p.amount || 0))}
-                                  </div>
+                              {pList.map((p) => {
+                                const parsed = parsePaymentNote(p.note);
+                                const installments = Math.max(
+                                  1,
+                                  Number(parsed.meta.installments || 1)
+                                );
+                                const receiptDocId =
+                                  parsed.meta.receipt_document_id ?? null;
+                                const linkedDocument = receiptDocId
+                                  ? documents.find((doc) => doc.id === receiptDocId) ?? null
+                                  : null;
 
-                                  <span className="text-xs text-gray-500">
-                                    •
-                                  </span>
-
-                                  <div className="text-sm text-gray-700">
-                                    {p.paid_at}
-                                  </div>
-
-                                  <span className="text-xs text-gray-500">
-                                    •
-                                  </span>
-
-                                  <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">
-                                    <PaymentMethodIcon method={p.method} />
-                                    {METHOD_UI[p.method].label}
-                                  </span>
-
-                                  {p.note ? (
-                                    <>
-                                      <span className="text-xs text-gray-500">
-                                        •
-                                      </span>
-                                      <div
-                                        className="text-sm text-gray-600 truncate max-w-[420px]"
-                                        title={p.note}
-                                      >
-                                        {p.note}
-                                      </div>
-                                    </>
-                                  ) : null}
-
-                                  <div className="flex-1" />
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setConfirmPaymentTarget({
-                                        id: p.id,
-                                        title: `${toBRL(Number(p.amount || 0))} • ${
-                                          METHOD_UI[p.method].label
-                                        } • ${p.paid_at}`,
-                                      });
-                                      setConfirmPaymentOpen(true);
-                                    }}
-                                    disabled={blocking}
-                                    className={`p-1 text-red-600 hover:bg-red-50 rounded ${
-                                      blocking
-                                        ? 'opacity-60 cursor-not-allowed'
-                                        : ''
-                                    }`}
-                                    title="Remover pagamento"
+                                return (
+                                  <div
+                                    key={p.id}
+                                    className="p-3 rounded-lg bg-white border border-gray-200"
                                   >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              ))}
+                                    <div className="flex items-center gap-3">
+                                      <div className="text-sm font-semibold text-gray-900">
+                                        {toBRL(Number(p.amount || 0))}
+                                      </div>
+                                      <span className="text-xs text-gray-500">•</span>
+                                      <div className="text-sm text-gray-700">{p.paid_at}</div>
+                                      <span className="text-xs text-gray-500">•</span>
+                                      <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">
+                                        <PaymentMethodIcon method={p.method} />
+                                        {METHOD_UI[p.method].label}
+                                      </span>
+                                      {installments > 1 && (
+                                        <>
+                                          <span className="text-xs text-gray-500">•</span>
+                                          <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-indigo-100 text-indigo-700">
+                                            {installments}x
+                                          </span>
+                                        </>
+                                      )}
+                                      {parsed.userNote ? (
+                                        <>
+                                          <span className="text-xs text-gray-500">•</span>
+                                          <div
+                                            className="text-sm text-gray-600 truncate max-w-[420px]"
+                                            title={parsed.userNote}
+                                          >
+                                            {parsed.userNote}
+                                          </div>
+                                        </>
+                                      ) : null}
+                                      <div className="flex-1" />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setConfirmPaymentTarget({
+                                            id: p.id,
+                                            title: `${toBRL(Number(p.amount || 0))} • ${
+                                              METHOD_UI[p.method].label
+                                            } • ${p.paid_at}`,
+                                          });
+                                          setConfirmPaymentOpen(true);
+                                        }}
+                                        disabled={blocking}
+                                        className={`p-1 text-red-600 hover:bg-red-50 rounded ${
+                                          blocking
+                                            ? 'opacity-60 cursor-not-allowed'
+                                            : ''
+                                        }`}
+                                        title="Remover pagamento"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
+
+                                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                                      <span className="text-xs text-gray-500">
+                                        Comprovante:
+                                      </span>
+                                      <select
+                                        value={receiptDocId ?? ''}
+                                        disabled={blocking}
+                                        onChange={(ev) =>
+                                          linkPaymentReceiptDocument(
+                                            p.id,
+                                            ev.target.value || null
+                                          )
+                                        }
+                                        className="text-xs px-2 py-1 rounded border border-gray-200 bg-white text-gray-700"
+                                      >
+                                        <option value="">Nenhum documento</option>
+                                        {documents.map((doc) => (
+                                          <option key={doc.id} value={doc.id}>
+                                            {doc.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      {linkedDocument && (
+                                        <button
+                                          type="button"
+                                          onClick={() => goToDocument(linkedDocument.id)}
+                                          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition"
+                                          title="Abrir comprovante na aba Documentos"
+                                        >
+                                          Comprovante de pagamento
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
                         </div>

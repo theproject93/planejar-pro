@@ -7,8 +7,10 @@ type TaskLike = {
   id: string;
   text: string;
   completed: boolean;
+  due_date?: string | null;
   duedate?: string | null;
   priority?: TaskPriority;
+  assignee_name?: string | null;
   assigneename?: string | null;
 
   // Importante: o componente NÃO usa eventid, então deixamos opcional
@@ -43,6 +45,10 @@ type Props = {
   addTask: () => void | Promise<void>;
   toggleTask: (taskId: string) => void | Promise<void>;
   deleteTask: (taskId: string) => void | Promise<void>;
+  updateTaskPriority: (
+    taskId: string,
+    priority: TaskPriority
+  ) => void | Promise<void>;
 
   onTaskDragStart: (index: number) => void;
   onTaskDragOver: (e: React.DragEvent, overIndex: number) => void;
@@ -67,6 +73,7 @@ export function TasksTab({
   addTask,
   toggleTask,
   deleteTask,
+  updateTaskPriority,
   onTaskDragStart,
   onTaskDragOver,
   onTaskDragEnd,
@@ -120,7 +127,10 @@ export function TasksTab({
       </div>
 
       <div className="space-y-2">
-        {tasks.map((t, idx) => (
+        {tasks.map((t, idx) => {
+          const taskDueDate = t.due_date ?? t.duedate;
+          const taskAssignee = t.assignee_name ?? t.assigneename;
+          return (
           <div
             key={t.id}
             draggable
@@ -148,16 +158,16 @@ export function TasksTab({
               </span>
 
               <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                {t.duedate && (
+                {taskDueDate && (
                   <span
                     className={`inline-flex items-center gap-1 ${
-                      isOverdue(t.duedate) && !t.completed
+                      isOverdue(taskDueDate) && !t.completed
                         ? 'text-red-600 font-medium'
                         : ''
                     }`}
                   >
                     <Calendar className="w-3 h-3" />
-                    {formatDate(t.duedate)}
+                    {formatDate(taskDueDate)}
                   </span>
                 )}
 
@@ -175,7 +185,21 @@ export function TasksTab({
                   </span>
                 )}
 
-                {t.assigneename && <span>{t.assigneename}</span>}
+                {taskAssignee && <span>{taskAssignee}</span>}
+
+                <select
+                  value={t.priority ?? 'normal'}
+                  onChange={(e) =>
+                    updateTaskPriority(t.id, e.target.value as TaskPriority)
+                  }
+                  className="ml-auto px-2 py-1 border border-gray-200 rounded-md text-xs bg-white text-gray-700"
+                  title="Alterar urgencia"
+                >
+                  <option value="low">Baixa</option>
+                  <option value="normal">Normal</option>
+                  <option value="high">Alta</option>
+                  <option value="urgent">Urgente</option>
+                </select>
               </div>
             </div>
 
@@ -187,7 +211,8 @@ export function TasksTab({
               <Trash2 className="w-4 h-4" />
             </button>
           </div>
-        ))}
+          );
+        })}
 
         {tasks.length === 0 && (
           <p className="text-gray-600 py-8 text-center">

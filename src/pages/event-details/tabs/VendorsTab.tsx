@@ -1,5 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { Mail, Phone, Plus, Trash2, Link2, AlertTriangle } from 'lucide-react';
+import {
+  Mail,
+  Phone,
+  Plus,
+  Trash2,
+  Link2,
+  AlertTriangle,
+  FileText,
+} from 'lucide-react';
 import type { ExpenseStatus } from './BudgetTab';
 
 type VendorStatus = 'pending' | 'confirmed' | 'paid' | 'cancelled';
@@ -62,6 +70,8 @@ type Props<
 
   // integração
   onGoToVendorExpenses: (vendorId: string) => void;
+  onGoToVendorDocuments?: (vendorId: string) => void;
+  paymentReceiptCountByVendor?: ReadonlyMap<string, number>;
 
   // UX premium
   isBusy?: boolean;
@@ -148,11 +158,11 @@ function clamp(n: number, min: number, max: number) {
 }
 
 function deriveExpenseStatus(
-  storedStatus: VendorStatus | ExpenseStatus | undefined,
+  storedStatus: ExpenseStatus | undefined,
   paidSum: number,
   value: number
 ): VendorStatus {
-  if ((storedStatus as any) === 'cancelled') return 'cancelled';
+  if (storedStatus === 'cancelled') return 'cancelled';
   if (value > 0 && paidSum >= value) return 'paid';
   if (paidSum > 0) return 'confirmed';
   return 'pending';
@@ -192,6 +202,8 @@ export function VendorsTab<
   onStatusChange,
   onDelete,
   onGoToVendorExpenses,
+  onGoToVendorDocuments,
+  paymentReceiptCountByVendor,
   isBusy = false,
   busyText = 'Aguarde…',
 }: Props<TVendor, TNewVendor, TExpense, TPayment>) {
@@ -231,7 +243,7 @@ export function VendorsTab<
       const paid = paidByExpenseId.get(e.id) ?? 0;
 
       const st = deriveExpenseStatus(
-        (e.status ?? 'pending') as any,
+        e.status ?? 'pending',
         paid,
         value
       );
@@ -358,11 +370,16 @@ export function VendorsTab<
           const computedStatus =
             countAll > 0 ? computeAggregateStatus(linked!.statuses) : v.status;
           const isAuto = countAll > 0;
+          const receiptCount = paymentReceiptCountByVendor?.get(v.id) ?? 0;
 
           const badgeText =
             countAll === 1
               ? 'Vinculado (1 despesa)'
               : `Vinculado (${countAll} despesas)`;
+          const receiptBadgeText =
+            receiptCount === 1
+              ? 'Vinculado (1 comprovante de pagamento)'
+              : `Vinculado (${receiptCount} comprovantes de pagamento)`;
 
           const pct = totalActive > 0 ? (paidActive / totalActive) * 100 : 0;
 
@@ -390,6 +407,20 @@ export function VendorsTab<
                     >
                       <Link2 className="w-3 h-3" />
                       {badgeText}
+                    </button>
+                  )}
+                  {receiptCount > 0 && onGoToVendorDocuments && (
+                    <button
+                      type="button"
+                      onClick={() => onGoToVendorDocuments(v.id)}
+                      disabled={blocking}
+                      className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 transition ${
+                        blocking ? 'opacity-60 cursor-not-allowed' : ''
+                      }`}
+                      title="Ver comprovantes desse fornecedor em Documentos"
+                    >
+                      <FileText className="w-3 h-3" />
+                      {receiptBadgeText}
                     </button>
                   )}
                 </div>

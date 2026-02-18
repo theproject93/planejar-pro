@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -7,16 +7,12 @@ import {
   DollarSign,
   Edit2,
   MapPin,
-  Plus,
-  Trash2,
   Users,
   X,
   CheckSquare,
   AlertCircle,
   Zap,
   Camera,
-  FileText,
-  LayoutGrid,
   Bell,
 } from 'lucide-react';
 import {
@@ -29,6 +25,12 @@ import {
 } from 'recharts';
 
 import { supabase } from '../lib/supabaseClient';
+import {
+  buildDefaultEventTasksPayload,
+  getDefaultEventTaskTemplates,
+  isLegacyWeddingChecklist,
+} from '../lib/defaultEventTasks';
+import { useAuth } from '../contexts/AuthContext';
 import { TasksTab } from './event-details/tabs/TasksTab';
 import { BudgetTab, type PaymentMethod } from './event-details/tabs/BudgetTab';
 import { GuestsTab } from './event-details/tabs/GuestsTab';
@@ -64,6 +66,66 @@ const COLORS = [
   '#FB923C',
   '#A78BFA',
 ];
+
+const METHOD_LABEL: Record<PaymentMethod, string> = {
+  pix: 'Pix',
+  dinheiro: 'Dinheiro',
+  debito: 'Débito',
+  credito: 'Crédito',
+  boleto: 'Boleto',
+  transferencia: 'Transferência',
+  outro: 'Outro',
+};
+
+const PAYMENT_META_PREFIX = '[[PP_META:';
+const PAYMENT_META_SUFFIX = ']]';
+
+type PaymentMeta = {
+  installments?: number;
+  receipt_document_id?: string | null;
+};
+
+function parsePaymentNote(note: string | null | undefined): {
+  userNote: string;
+  meta: PaymentMeta;
+} {
+  const raw = (note ?? '').trim();
+  if (!raw) return { userNote: '', meta: {} };
+
+  const start = raw.lastIndexOf(PAYMENT_META_PREFIX);
+  const hasSuffix = raw.endsWith(PAYMENT_META_SUFFIX);
+  if (start < 0 || !hasSuffix) return { userNote: raw, meta: {} };
+
+  const jsonStart = start + PAYMENT_META_PREFIX.length;
+  const jsonEnd = raw.length - PAYMENT_META_SUFFIX.length;
+  const before = raw.slice(0, start).trim();
+  const json = raw.slice(jsonStart, jsonEnd).trim();
+
+  try {
+    return {
+      userNote: before,
+      meta: (JSON.parse(json) as PaymentMeta) ?? {},
+    };
+  } catch {
+    return { userNote: raw, meta: {} };
+  }
+}
+
+function composePaymentNote(
+  userNote: string | null | undefined,
+  meta: PaymentMeta
+): string | null {
+  const clean = (userNote ?? '').trim();
+  const hasMeta =
+    typeof meta.installments === 'number' ||
+    typeof meta.receipt_document_id === 'string' ||
+    meta.receipt_document_id === null;
+
+  if (!hasMeta) return clean || null;
+  return `${clean}${clean ? '\n' : ''}${PAYMENT_META_PREFIX}${JSON.stringify(
+    meta
+  )}${PAYMENT_META_SUFFIX}`;
+}
 
 type Tab =
   | 'overview'
@@ -270,6 +332,7 @@ const PRIORITY_CONFIG = {
 export function EventDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const eventId = id ?? '';
+  const { user } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -292,7 +355,16 @@ export function EventDetailsPage() {
   const [documentsVendorFilterId, setDocumentsVendorFilterId] = useState<
     string | null
   >(null);
+  const [documentsReceiptFilterId, setDocumentsReceiptFilterId] = useState<
+    string | null
+  >(null);
+  function goToDocumentById(documentId: string) {
+    setDocumentsVendorFilterId(null);
+    setDocumentsReceiptFilterId(documentId);
+    setActiveTab('documents');
+  }
   function goToDocumentsFilteredByVendor(vendorId: string) {
+    setDocumentsReceiptFilterId(null);
     setDocumentsVendorFilterId(vendorId);
     setActiveTab('documents');
   }
@@ -302,6 +374,9 @@ export function EventDetailsPage() {
 
   const [loading, setLoading] = useState(true);
   const [savingBasics, setSavingBasics] = useState(false);
+  const [savingBudgetCard, setSavingBudgetCard] = useState(false);
+  const [isBudgetCardEditing, setIsBudgetCardEditing] = useState(false);
+  const [budgetCardDraft, setBudgetCardDraft] = useState('');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -319,6 +394,30 @@ export function EventDetailsPage() {
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [team, setTeam] = useState<TeamMemberRow[]>([]);
   const [tables, setTables] = useState<TableRow[]>([]);
+
+  const paymentReceiptCountByVendor = useMemo(() => {
+    const documentsById = new Map(documents.map((doc) => [doc.id, doc]));
+    const receiptIdsByVendor = new Map<string, Set<string>>();
+
+    for (const payment of payments) {
+      const receiptDocumentId = parsePaymentNote(payment.note).meta
+        .receipt_document_id;
+      if (!receiptDocumentId) continue;
+
+      const vendorId = documentsById.get(receiptDocumentId)?.vendor_id ?? null;
+      if (!vendorId) continue;
+
+      const ids = receiptIdsByVendor.get(vendorId) ?? new Set<string>();
+      ids.add(receiptDocumentId);
+      receiptIdsByVendor.set(vendorId, ids);
+    }
+
+    const counts = new Map<string, number>();
+    for (const [vendorId, receiptIds] of receiptIdsByVendor.entries()) {
+      counts.set(vendorId, receiptIds.size);
+    }
+    return counts;
+  }, [documents, payments]);
 
   const tasksRef = useRef<TaskRow[]>([]);
   useEffect(() => {
@@ -383,9 +482,41 @@ export function EventDetailsPage() {
     [expenses]
   );
 
+  const paymentsByMethod = useMemo(() => {
+    const expenseStatusById = new Map<string, ExpenseRow['status']>();
+    expenses.forEach((expenseItem) => {
+      expenseStatusById.set(
+        expenseItem.id,
+        (expenseItem.status ?? 'pending') as ExpenseRow['status']
+      );
+    });
+
+    const map = new Map<PaymentMethod, number>();
+    payments.forEach((paymentItem) => {
+      const st = expenseStatusById.get(paymentItem.expense_id) ?? 'pending';
+      if (st === 'cancelled') return;
+      map.set(
+        paymentItem.method,
+        (map.get(paymentItem.method) ?? 0) + Number(paymentItem.amount || 0)
+      );
+    });
+
+    return Array.from(map.entries()).map(([method, value], idx) => ({
+      id: method,
+      name: METHOD_LABEL[method],
+      value,
+      color: COLORS[idx % COLORS.length],
+    }));
+  }, [payments, expenses]);
+
   const budgetTotal = Number(event?.budget_total || 0);
   const budgetProgress =
     budgetTotal > 0 ? Math.min((totalSpent / budgetTotal) * 100, 100) : 0;
+
+  useEffect(() => {
+    setBudgetCardDraft(String(Number(event?.budget_total || 0)));
+    setIsBudgetCardEditing(false);
+  }, [event?.id, event?.budget_total]);
 
   const completedTasks = useMemo(
     () => tasks.filter((t) => t.completed).length,
@@ -488,6 +619,11 @@ export function EventDetailsPage() {
         setLoading(false);
         return;
       }
+      if (!user) {
+        setErrorMsg('Usuário não autenticado.');
+        setLoading(false);
+        return;
+      }
 
       setLoading(true);
       setErrorMsg(null);
@@ -506,7 +642,14 @@ export function EventDetailsPage() {
           teamRes,
           tablesRes,
         ] = await Promise.all([
-          supabase.from(T_EVENTS).select('*').eq('id', eventId).single(),
+          supabase
+            .from(T_EVENTS)
+            .select(
+              'id, user_id, name, event_type, event_date, location, status, couple, couple_photo_url, budget_total, guests_planned, updated_at'
+            )
+            .eq('id', eventId)
+            .eq('user_id', user.id)
+            .single(),
           supabase
             .from(T_TASKS)
             .select('*')
@@ -573,8 +716,54 @@ export function EventDetailsPage() {
 
         if (cancelled) return;
 
-        setEvent(eventRes.data as EventRow);
-        setTasks((tasksRes.data as TaskRow[]) ?? []);
+        const loadedEvent = eventRes.data as EventRow;
+        const eventType = loadedEvent?.event_type ?? 'wedding';
+
+        let loadedTasks = ((tasksRes.data as TaskRow[]) ?? []).sort(
+          (a, b) => a.position - b.position
+        );
+
+        if (loadedTasks.length === 0) {
+          const { data: insertedDefaultTasks, error: insertDefaultTasksError } =
+            await supabase
+              .from(T_TASKS)
+              .insert(buildDefaultEventTasksPayload(eventId, eventType))
+              .select('*');
+
+          if (insertDefaultTasksError) throw insertDefaultTasksError;
+
+          loadedTasks = ((insertedDefaultTasks as TaskRow[]) ?? []).sort(
+            (a, b) => a.position - b.position
+          );
+        }
+
+        const shouldMigrateLegacyChecklist =
+          eventType !== 'wedding' && isLegacyWeddingChecklist(loadedTasks);
+
+        if (shouldMigrateLegacyChecklist) {
+          const nextTemplate = getDefaultEventTaskTemplates(eventType);
+          const migrationPayload = loadedTasks.map((task, idx) => ({
+            id: task.id,
+            text: nextTemplate[idx]?.text ?? task.text,
+            priority: nextTemplate[idx]?.priority ?? task.priority ?? 'normal',
+            position: idx,
+          }));
+
+          const { error: migrationError } = await supabase
+            .from(T_TASKS)
+            .upsert(migrationPayload, { onConflict: 'id' });
+          if (migrationError) throw migrationError;
+
+          loadedTasks = loadedTasks.map((task, idx) => ({
+            ...task,
+            text: nextTemplate[idx]?.text ?? task.text,
+            priority: nextTemplate[idx]?.priority ?? task.priority ?? 'normal',
+            position: idx,
+          }));
+        }
+
+        setEvent(loadedEvent);
+        setTasks(loadedTasks);
         setExpenses((expensesRes.data as ExpenseRow[]) ?? []);
         setPayments((paymentsRes.data as PaymentRow[]) ?? []);
         setGuests((guestsRes.data as GuestRow[]) ?? []);
@@ -597,7 +786,7 @@ export function EventDetailsPage() {
     return () => {
       cancelled = true;
     };
-  }, [eventId]);
+  }, [eventId, user]);
 
   // --------------------
   // Upload foto
@@ -892,12 +1081,19 @@ export function EventDetailsPage() {
       method: PaymentMethod;
       paid_at: string;
       note?: string | null;
+      installments?: number;
     }
   ) {
     if (!eventId || !expenseId) return;
 
     const amount = Number(payload.amount);
     if (!Number.isFinite(amount) || amount <= 0) return;
+
+    const installments = Math.max(1, Number(payload.installments || 1));
+    const composedNote = composePaymentNote(payload.note, {
+      installments,
+      receipt_document_id: null,
+    });
 
     try {
       const res = await supabase
@@ -908,7 +1104,7 @@ export function EventDetailsPage() {
           amount,
           method: payload.method,
           paid_at: payload.paid_at,
-          note: payload.note ?? null,
+          note: composedNote,
         })
         .select('*')
         .single();
@@ -918,6 +1114,118 @@ export function EventDetailsPage() {
       setPayments((prev) => [res.data as PaymentRow, ...prev]);
     } catch (err: any) {
       setErrorMsg(err?.message ?? 'Erro ao registrar pagamento.');
+    }
+  }
+
+  async function saveBudgetFromCard() {
+    if (!event || !user || savingBudgetCard) return;
+
+    const parsedBudget = Number((budgetCardDraft ?? '').trim());
+    if (!Number.isFinite(parsedBudget) || parsedBudget < 0) {
+      setErrorMsg('Informe um orçamento válido (0 ou maior).');
+      return;
+    }
+
+    setSavingBudgetCard(true);
+    setErrorMsg(null);
+
+    try {
+      const { error } = await supabase
+        .from(T_EVENTS)
+        .update({
+          budget_total: parsedBudget,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', event.id)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setEvent((prev) =>
+        prev
+          ? { ...prev, budget_total: parsedBudget, updated_at: new Date().toISOString() }
+          : prev
+      );
+      setIsBudgetCardEditing(false);
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao salvar orçamento do evento.');
+    } finally {
+      setSavingBudgetCard(false);
+    }
+  }
+
+  async function updateTaskPriority(
+    taskId: string,
+    priority: 'low' | 'normal' | 'high' | 'urgent'
+  ) {
+    const currentTask = tasks.find((x) => x.id === taskId);
+    if (!currentTask || currentTask.priority === priority) return;
+
+    try {
+      const res = await supabase
+        .from(T_TASKS)
+        .update({ priority })
+        .eq('id', taskId);
+      if (res.error) throw res.error;
+
+      setTasks((prev) =>
+        prev.map((x) => (x.id === taskId ? { ...x, priority } : x))
+      );
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao atualizar prioridade da tarefa.');
+    }
+  }
+
+  async function linkPaymentReceiptDocument(
+    paymentId: string,
+    documentId: string | null
+  ) {
+    const current = payments.find((p) => p.id === paymentId);
+    if (!current) return;
+    const expenseVendorId =
+      expenses.find((e) => e.id === current.expense_id)?.vendor_id ?? null;
+    const currentDocVendorId =
+      documentId != null
+        ? documents.find((doc) => doc.id === documentId)?.vendor_id ?? null
+        : null;
+
+    const parsed = parsePaymentNote(current.note);
+    const nextNote = composePaymentNote(parsed.userNote, {
+      ...parsed.meta,
+      receipt_document_id: documentId,
+    });
+
+    try {
+      const res = await supabase
+        .from(T_PAYMENTS)
+        .update({ note: nextNote })
+        .eq('id', paymentId);
+      if (res.error) throw res.error;
+
+      setPayments((prev) =>
+        prev.map((p) => (p.id === paymentId ? { ...p, note: nextNote } : p))
+      );
+
+      const canAutoLinkDocumentVendor =
+        documentId &&
+        expenseVendorId &&
+        (currentDocVendorId == null || currentDocVendorId === '');
+
+      if (canAutoLinkDocumentVendor) {
+        const docRes = await supabase
+          .from(T_DOCUMENTS)
+          .update({ vendor_id: expenseVendorId })
+          .eq('id', documentId);
+        if (docRes.error) throw docRes.error;
+
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === documentId ? { ...doc, vendor_id: expenseVendorId } : doc
+          )
+        );
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao vincular comprovante.');
     }
   }
 
@@ -1333,7 +1641,7 @@ export function EventDetailsPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50">
         <div className="max-w-7xl mx-auto px-4 py-10 text-gray-700">
-          Carregando…
+          Carregando...
         </div>
       </div>
     );
@@ -1472,14 +1780,61 @@ export function EventDetailsPage() {
           <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-yellow-500">
             <div className="flex items-center justify-between">
               <p className="text-gray-600 text-sm">Orçamento</p>
-              <DollarSign className="w-6 h-6 text-yellow-500" />
+              <div className="flex items-center gap-2">
+                {!isBudgetCardEditing && (
+                  <button
+                    type="button"
+                    onClick={() => setIsBudgetCardEditing(true)}
+                    className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"
+                    title="Editar orçamento total"
+                    disabled={savingBudgetCard}
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                )}
+                <DollarSign className="w-6 h-6 text-yellow-500" />
+              </div>
             </div>
-            <p className="text-lg font-bold text-gray-800 mt-2">
-              {toBRL(budgetTotal)}
-            </p>
-            <p className="text-sm text-gray-600 mt-1">
-              Gasto: {toBRL(totalSpent)}
-            </p>
+            {isBudgetCardEditing ? (
+              <div className="mt-2 space-y-2">
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={budgetCardDraft}
+                  onChange={(e) => setBudgetCardDraft(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                  placeholder="Orçamento total"
+                  disabled={savingBudgetCard}
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBudgetCardDraft(String(budgetTotal));
+                      setIsBudgetCardEditing(false);
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 text-sm"
+                    disabled={savingBudgetCard}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveBudgetFromCard}
+                    className="px-3 py-1.5 rounded-lg bg-yellow-500 text-white hover:bg-yellow-600 text-sm disabled:opacity-60"
+                    disabled={savingBudgetCard}
+                  >
+                    {savingBudgetCard ? 'Salvando...' : 'Salvar'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-lg font-bold text-gray-800 mt-2">
+                {toBRL(budgetTotal)}
+              </p>
+            )}
+            <p className="text-sm text-gray-600 mt-1">Gasto: {toBRL(totalSpent)}</p>
             <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
               <div
                 className="bg-yellow-500 h-2 rounded-full"
@@ -1537,6 +1892,10 @@ export function EventDetailsPage() {
               onClick={() => {
                 setActiveTab(t);
                 if (t !== 'budget') setBudgetVendorFilterId(null);
+                if (t !== 'documents') {
+                  setDocumentsVendorFilterId(null);
+                  setDocumentsReceiptFilterId(null);
+                }
               }}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                 activeTab === t
@@ -1561,7 +1920,7 @@ export function EventDetailsPage() {
 
         {/* Conteúdo */}
         {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
             {/* Gráfico de despesas */}
             <div className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex items-baseline justify-between mb-3">
@@ -1607,7 +1966,67 @@ export function EventDetailsPage() {
                 </div>
               ) : (
                 <p className="text-gray-600 py-10 text-center">
-                  Sem despesas ainda — adicione na aba Financeiro.
+                  Sem despesas ainda - adicione na aba Financeiro.
+                </p>
+              )}
+            </div>
+
+            {/* Gráfico de pagamentos por método */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex items-baseline justify-between mb-3">
+                <h2 className="text-lg font-bold text-gray-800">
+                  Gastos por método de pagamento
+                </h2>
+                <div className="text-right">
+                  <p className="text-xs text-gray-500">Total pago</p>
+                  <p className="text-lg font-bold text-gray-800">
+                    {toBRL(
+                      paymentsByMethod.reduce(
+                        (acc, curr) => acc + Number(curr.value || 0),
+                        0
+                      )
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {paymentsByMethod.length > 0 ? (
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={paymentsByMethod}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={70}
+                        outerRadius={100}
+                      >
+                        {paymentsByMethod.map((m, idx) => (
+                          <Cell
+                            key={m.id}
+                            fill={m.color || COLORS[idx % COLORS.length]}
+                          />
+                        ))}
+                        <Label
+                          value={toBRL(
+                            paymentsByMethod.reduce(
+                              (acc, curr) => acc + Number(curr.value || 0),
+                              0
+                            )
+                          )}
+                          position="center"
+                          className="text-lg font-bold fill-gray-800"
+                        />
+                      </Pie>
+                      <Tooltip formatter={(v: any) => toBRL(Number(v || 0))} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <p className="text-gray-600 py-10 text-center">
+                  Sem pagamentos ainda - registre na aba Financeiro.
                 </p>
               )}
             </div>
@@ -1679,7 +2098,7 @@ export function EventDetailsPage() {
 
                 {pendingTasks.length === 0 && (
                   <p className="text-gray-600 text-center py-10">
-                    Nenhuma tarefa pendente! 🎉
+                    Nenhuma tarefa pendente! ðŸŽ‰
                   </p>
                 )}
               </div>
@@ -1708,6 +2127,7 @@ export function EventDetailsPage() {
             addTask={addTask}
             toggleTask={toggleTask}
             deleteTask={deleteTask}
+            updateTaskPriority={updateTaskPriority}
             onTaskDragStart={onTaskDragStart}
             onTaskDragOver={onTaskDragOver}
             onTaskDragEnd={onTaskDragEnd}
@@ -1724,6 +2144,7 @@ export function EventDetailsPage() {
             expenses={expenses}
             setExpenses={setExpenses}
             payments={payments}
+            documents={documents}
             newExpense={newExpense}
             setNewExpense={setNewExpense}
             addExpense={addExpense}
@@ -1731,12 +2152,14 @@ export function EventDetailsPage() {
             deleteExpense={deleteExpense}
             addPayment={addPayment}
             deletePayment={deletePayment}
+            linkPaymentReceiptDocument={linkPaymentReceiptDocument}
+            goToDocument={goToDocumentById}
             totalSpent={totalSpent}
             toBRL={toBRL}
             vendorFilterId={budgetVendorFilterId}
             onClearVendorFilter={clearBudgetVendorFilter}
             isBusy={isAddingExpense}
-            busyText="Salvando no Supabase…"
+            busyText="Salvando no Supabase..."
           />
         )}
 
@@ -1744,13 +2167,15 @@ export function EventDetailsPage() {
           <VendorsTab
             newVendor={newVendor}
             setNewVendor={setNewVendor}
-            onAdd={async () => {}}
+            onAdd={addVendor}
             vendors={vendors}
             expenses={expenses}
             payments={payments}
-            onStatusChange={async () => {}}
-            onDelete={async () => {}}
+            onStatusChange={updateVendorStatus}
+            onDelete={deleteVendor}
             onGoToVendorExpenses={goToBudgetFilteredByVendor}
+            onGoToVendorDocuments={goToDocumentsFilteredByVendor}
+            paymentReceiptCountByVendor={paymentReceiptCountByVendor}
           />
         )}
 
@@ -1788,6 +2213,10 @@ export function EventDetailsPage() {
             onUpdateDocument={updateDocument}
             vendorFilterId={documentsVendorFilterId}
             onClearVendorFilter={() => setDocumentsVendorFilterId(null)}
+            paymentReceiptDocumentId={documentsReceiptFilterId}
+            onClearPaymentReceiptFilter={() =>
+              setDocumentsReceiptFilterId(null)
+            }
           />
         )}
 
@@ -1958,7 +2387,7 @@ export function EventDetailsPage() {
                   disabled={savingBasics}
                   className="px-4 py-2 rounded-lg bg-gradient-to-r from-pink-500 to-purple-500 text-white disabled:opacity-60"
                 >
-                  {savingBasics ? 'Salvando…' : 'Salvar'}
+                  {savingBasics ? 'Salvando...' : 'Salvar'}
                 </button>
               </div>
             </div>
@@ -2020,3 +2449,4 @@ function TaskCard({
     </button>
   );
 }
+

@@ -42,6 +42,8 @@ type Props<TDoc extends DocumentItem, TVendor extends VendorItem> = {
   // filtro (para vir da aba fornecedores)
   vendorFilterId?: string | null;
   onClearVendorFilter?: () => void;
+  paymentReceiptDocumentId?: string | null;
+  onClearPaymentReceiptFilter?: () => void;
 };
 
 function ConfirmDialog({
@@ -125,6 +127,8 @@ export function DocumentsTab<
   onUpdateDocument,
   vendorFilterId = null,
   onClearVendorFilter,
+  paymentReceiptDocumentId = null,
+  onClearPaymentReceiptFilter,
 }: Props<TDoc, TVendor>) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<TDoc | null>(null);
@@ -136,9 +140,15 @@ export function DocumentsTab<
   }, [vendorFilterId, vendors]);
 
   const visibleDocs = useMemo(() => {
-    if (!vendorFilterId) return documents;
-    return documents.filter((d) => (d.vendor_id ?? null) === vendorFilterId);
-  }, [documents, vendorFilterId]);
+    let filtered = documents;
+    if (vendorFilterId) {
+      filtered = filtered.filter((d) => (d.vendor_id ?? null) === vendorFilterId);
+    }
+    if (paymentReceiptDocumentId) {
+      filtered = filtered.filter((d) => d.id === paymentReceiptDocumentId);
+    }
+    return filtered;
+  }, [documents, vendorFilterId, paymentReceiptDocumentId]);
 
   const blocking = uploadingDoc || isDeleting;
 
@@ -161,6 +171,28 @@ export function DocumentsTab<
           <div className="px-4 py-3 bg-white border border-gray-200 rounded-lg shadow-sm text-sm text-gray-700">
             {isDeleting ? 'Excluindo…' : 'Enviando documento…'}
           </div>
+        </div>
+      )}
+
+      {paymentReceiptDocumentId && (
+        <div className="mb-4 flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-lg px-3 py-2 text-sm">
+          <span className="truncate inline-flex items-center gap-2">
+            <Link2 className="w-4 h-4" />
+            Comprovante de pagamento vinculado
+          </span>
+
+          {onClearPaymentReceiptFilter && (
+            <button
+              onClick={onClearPaymentReceiptFilter}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-emerald-100 transition"
+              title="Limpar filtro de comprovante"
+              type="button"
+              disabled={blocking}
+            >
+              <X className="w-4 h-4" />
+              Limpar
+            </button>
+          )}
         </div>
       )}
 
@@ -250,7 +282,7 @@ export function DocumentsTab<
                   disabled={blocking}
                   onChange={(e) => {
                     const vendor_id = e.target.value || null;
-                    onUpdateDocument(doc.id, { vendor_id } as any);
+                    onUpdateDocument(doc.id, { vendor_id });
                   }}
                   className="text-xs px-2 py-1 rounded border border-gray-200 bg-white text-gray-700"
                   title="Vincular a fornecedor"

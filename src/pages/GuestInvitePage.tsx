@@ -47,6 +47,7 @@ export function GuestInvitePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [submissionComplete, setSubmissionComplete] = useState(false);
   const [invite, setInvite] = useState<GuestInviteData | null>(null);
   const [status, setStatus] = useState<GuestStatus>('pending');
   const [plusOneCount, setPlusOneCount] = useState('0');
@@ -138,6 +139,7 @@ export function GuestInvitePage() {
     );
 
     setSuccessMessage('RSVP atualizado com sucesso. Obrigado pela confirmacao.');
+    setSubmissionComplete(true);
     setSaving(false);
   }
 
@@ -156,6 +158,15 @@ export function GuestInvitePage() {
           </div>
         ) : invite ? (
           <>
+            {submissionComplete ? (
+              <div className="py-10 text-center">
+                <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500 mb-3" />
+                <p className="text-gray-800 font-semibold">
+                  RSVP atualizado com sucesso. Obrigado pela confirmacao.
+                </p>
+              </div>
+            ) : (
+              <>
             <p className="text-xs uppercase tracking-wide text-gray-500">Convite digital</p>
             <h1 className="mt-2 text-3xl font-bold text-gray-900">{eventTitle}</h1>
             <p className="mt-2 text-gray-700">Ola, <b>{invite.guest_name}</b>. Confirme sua presenca abaixo.</p>
@@ -243,6 +254,8 @@ export function GuestInvitePage() {
             >
               {saving ? 'Salvando...' : 'Salvar resposta'}
             </button>
+              </>
+            )}
           </>
         ) : null}
       </div>

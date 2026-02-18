@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Area,
   AreaChart,
@@ -112,6 +113,7 @@ function monthLabel(date: Date) {
 
 export function FinanceiroPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
   const [expenses, setExpenses] = useState<FinanceExpense[]>([]);
   const [categories, setCategories] = useState<FinanceCategory[]>([]);
@@ -147,16 +149,59 @@ export function FinanceiroPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [openingProofId, setOpeningProofId] = useState<string | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState<'cash' | 'events'>('cash');
+  const [cashInput, setCashInput] = useState('0');
+  const [eventsCount, setEventsCount] = useState(0);
+  const [isSyncingEvents, setIsSyncingEvents] = useState(false);
+
+  const SELF_VENDOR_CATEGORY = 'Assessoria/Cerimonialista';
+
+  function getSelfVendorName(email?: string | null) {
+    if (!email) return 'Assessoria/Cerimonialista';
+    return email.split('@')[0] || 'Assessoria/Cerimonialista';
+  }
 
   const loadFinance = async () => {
     if (!user) return;
     setLoading(true);
+
+    const onboardingRes = await supabase
+      .from('user_finance_onboarding')
+      .select('completed_at')
+      .eq('user_id', user.id)
+      .maybeSingle();
 
     const balanceRes = await supabase
       .from('user_finance_balance')
       .select('base_balance')
       .eq('user_id', user.id)
       .maybeSingle();
+
+    const eventsRes = await supabase
+      .from('events')
+      .select('id')
+      .eq('user_id', user.id);
+
+    const eventIds = (eventsRes.data ?? []).map((row) => row.id);
+    setEventsCount(eventIds.length);
+    let teamData: { name: string | null; role: string | null }[] = [];
+
+    if (eventIds.length > 0) {
+      const teamRes = await supabase
+        .from('event_team_members')
+        .select('name, role')
+        .in('event_id', eventIds);
+      teamData = (teamRes.data ?? []) as {
+        name: string | null;
+        role: string | null;
+      }[];
+    }
+
+    if (eventIds.length > 0) {
+      await ensureSelfVendors(eventIds);
+      await syncAssessoriaEntries(eventIds);
+    }
 
     const entriesRes = await supabase
       .from('user_finance_entries')
@@ -174,25 +219,6 @@ export function FinanceiroPage() {
       .from('user_finance_categories')
       .select('*')
       .eq('user_id', user.id);
-
-    const eventsRes = await supabase
-      .from('events')
-      .select('id')
-      .eq('user_id', user.id);
-
-    const eventIds = (eventsRes.data ?? []).map((row) => row.id);
-    let teamData: { name: string | null; role: string | null }[] = [];
-
-    if (eventIds.length > 0) {
-      const teamRes = await supabase
-        .from('event_team_members')
-        .select('name, role')
-        .in('event_id', eventIds);
-      teamData = (teamRes.data ?? []) as {
-        name: string | null;
-        role: string | null;
-      }[];
-    }
 
     if (!entriesRes.error) setEntries(entriesRes.data ?? []);
     if (!expensesRes.error) setExpenses(expensesRes.data ?? []);
@@ -235,11 +261,118 @@ export function FinanceiroPage() {
 
     setTeamRanking(ranked);
     setLoading(false);
+
+    const completed = !!onboardingRes.data?.completed_at;
+    if (!completed) {
+      setCashInput(String(balanceRes.data?.base_balance ?? 0));
+      setOnboardingOpen(true);
+      setOnboardingStep('cash');
+    }
   };
 
   useEffect(() => {
     loadFinance();
   }, [user]);
+
+  async function markOnboardingComplete() {
+    if (!user) return;
+    await supabase.from('user_finance_onboarding').upsert({
+      user_id: user.id,
+      completed_at: new Date().toISOString(),
+    });
+    setOnboardingOpen(false);
+  }
+
+  async function handleSaveInitialCash() {
+    if (!user) return;
+    const value = Number(cashInput.replace(',', '.')) || 0;
+    await supabase.from('user_finance_balance').upsert({
+      user_id: user.id,
+      base_balance: value,
+      updated_at: new Date().toISOString(),
+    });
+    setBaseBalance(value);
+    setOnboardingStep('events');
+  }
+
+  async function ensureSelfVendors(eventIds: string[]) {
+    if (!user || eventIds.length === 0) return;
+    const { data: vendors } = await supabase
+      .from('event_vendors')
+      .select('id,event_id,category,name')
+      .in('event_id', eventIds);
+
+    const existingByEvent = new Map<string, boolean>();
+    (vendors ?? []).forEach((vendor) => {
+      const isSelf =
+        vendor.category === SELF_VENDOR_CATEGORY ||
+        vendor.name === getSelfVendorName(user.email);
+      if (isSelf) {
+        existingByEvent.set(vendor.event_id, true);
+      }
+    });
+
+    const toInsert = eventIds
+      .filter((eventId) => !existingByEvent.has(eventId))
+      .map((eventId) => ({
+        event_id: eventId,
+        name: getSelfVendorName(user.email),
+        category: SELF_VENDOR_CATEGORY,
+        status: 'confirmed',
+      }));
+
+    if (toInsert.length > 0) {
+      await supabase.from('event_vendors').insert(toInsert);
+    }
+  }
+
+  async function syncAssessoriaEntries(eventIds: string[]) {
+    if (!user || eventIds.length === 0) return;
+
+    const { data: vendors } = await supabase
+      .from('event_vendors')
+      .select('id,event_id,category,name')
+      .in('event_id', eventIds);
+
+    const selfVendorIds = (vendors ?? [])
+      .filter(
+        (vendor) =>
+          vendor.category === SELF_VENDOR_CATEGORY ||
+          vendor.name === getSelfVendorName(user.email)
+      )
+      .map((vendor) => vendor.id);
+
+    if (selfVendorIds.length === 0) return;
+
+    const { data: expensesData } = await supabase
+      .from('event_expenses')
+      .select('id,event_id,name,value,vendor_id, events(name,event_date,user_id)')
+      .in('vendor_id', selfVendorIds);
+
+    const entriesPayload =
+      (expensesData ?? [])
+        .filter((row) => row.events?.user_id === user.id)
+        .map((row) => ({
+          user_id: user.id,
+          title: `Assessoria • ${row.events?.name ?? row.name ?? 'Evento'}`,
+          client_name: row.events?.name ?? null,
+          amount: Number(row.value) || 0,
+          status: 'previsto' as const,
+          expected_at: row.events?.event_date ?? null,
+          payment_method: 'transferencia',
+          notes: 'Receita prevista do seu evento.',
+          source_event_id: row.event_id,
+          source_vendor_id: row.vendor_id,
+          source_expense_id: row.id,
+        }))
+        .filter((item) => Number(item.amount) > 0) ?? [];
+
+    if (entriesPayload.length === 0) return;
+
+    await supabase
+      .from('user_finance_entries')
+      .upsert(entriesPayload, { onConflict: 'source_expense_id' });
+  }
 
   async function uploadProof(file: File, kind: 'entries' | 'expenses') {
     if (!user) return null;
@@ -517,6 +650,9 @@ export function FinanceiroPage() {
     return {
       balance: baseBalance + totalEntries - totalExpenses,
       confirmedEntries,
+      plannedEntries: entries
+        .filter((entry) => PLANNED_STATUSES.has(entry.status))
+        .reduce((acc, entry) => acc + (Number(entry.amount) || 0), 0),
       plannedExpenses,
     };
   }, [entries, expenses, baseBalance]);
@@ -582,7 +718,7 @@ export function FinanceiroPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -622,6 +758,24 @@ export function FinanceiroPage() {
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
           <div className="flex items-center justify-between">
             <div>
+              <p className="text-sm text-gray-500">Entradas programadas</p>
+              <p className="text-2xl font-bold text-gray-900 mt-2">
+                {currency(stats.plannedEntries)}
+              </p>
+              <p className="text-xs text-blue-600 mt-2 flex items-center gap-1">
+                <TrendingUp className="w-4 h-4" />
+                Previstas e parceladas
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-blue-50 text-blue-500">
+              <Wallet className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+          <div className="flex items-center justify-between">
+            <div>
               <p className="text-sm text-gray-500">Saidas programadas</p>
               <p className="text-2xl font-bold text-gray-900 mt-2">
                 {currency(stats.plannedExpenses)}
@@ -637,6 +791,126 @@ export function FinanceiroPage() {
           </div>
         </div>
       </div>
+
+      {onboardingOpen && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
+            <div className="px-8 py-6 border-b border-gray-100 bg-gray-50">
+              <h2 className="text-2xl font-bold text-gray-900 font-playfair">
+                Que bom ter voce aqui
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Vamos calibrar seu financeiro para começar certo.
+              </p>
+            </div>
+            <div className="p-8 space-y-6">
+              {onboardingStep === 'cash' && (
+                <>
+                  <div>
+                    <p className="text-gray-800 font-semibold">
+                      Quanto voce possui em caixa hoje?
+                    </p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Esse valor ajusta seu saldo inicial no dashboard.
+                    </p>
+                  </div>
+                  <input
+                    type="number"
+                    value={cashInput}
+                    onChange={(e) => setCashInput(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none text-lg"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleSaveInitialCash}
+                      className="px-6 py-3 bg-gold-500 hover:bg-gold-600 text-white font-bold rounded-xl shadow-lg hover:shadow-gold-500/30 transition-all"
+                    >
+                      Continuar
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {onboardingStep === 'events' && (
+                <>
+                  {eventsCount === 0 ? (
+                    <>
+                      <p className="text-gray-800 font-semibold">
+                        Vi que voce ainda nao tem nenhum evento cadastrado.
+                      </p>
+                      <p className="text-sm text-gray-500">
+                        Deseja cadastrar seu primeiro evento agora?
+                      </p>
+                      <div className="flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          onClick={() => navigate('/dashboard/eventos')}
+                          className="px-6 py-3 bg-gold-500 hover:bg-gold-600 text-white font-bold rounded-xl shadow-lg hover:shadow-gold-500/30 transition-all"
+                        >
+                          Cadastrar agora
+                        </button>
+                        <button
+                          type="button"
+                          onClick={markOnboardingComplete}
+                          className="px-6 py-3 border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50"
+                        >
+                          Agora nao
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-gray-800 font-semibold">
+                        Vi que voce ja tem eventos cadastrados.
+                      </p>
+                      <p className="text-sm text-gray-500">
+                        Posso contabilizar agora os eventos em que voce e a assessoria?
+                      </p>
+                      <div className="flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setIsSyncingEvents(true);
+                            await ensureSelfVendors(
+                              Array.from(new Set((await supabase
+                                .from('events')
+                                .select('id')
+                                .eq('user_id', user?.id ?? '')
+                              ).data?.map((row) => row.id) ?? []))
+                            );
+                            await syncAssessoriaEntries(
+                              Array.from(new Set((await supabase
+                                .from('events')
+                                .select('id')
+                                .eq('user_id', user?.id ?? '')
+                              ).data?.map((row) => row.id) ?? []))
+                            );
+                            await loadFinance();
+                            setIsSyncingEvents(false);
+                            await markOnboardingComplete();
+                          }}
+                          disabled={isSyncingEvents}
+                          className="px-6 py-3 bg-gold-500 hover:bg-gold-600 text-white font-bold rounded-xl shadow-lg hover:shadow-gold-500/30 transition-all"
+                        >
+                          {isSyncingEvents ? 'Processando...' : 'Sim, contabilizar'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={markOnboardingComplete}
+                          className="px-6 py-3 border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50"
+                        >
+                          Nao agora
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mb-8">
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">

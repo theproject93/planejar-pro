@@ -22,6 +22,13 @@ interface Event {
   event_type?: string;
 }
 
+function getSelfVendorName(email?: string | null) {
+  if (!email) return 'Assessoria/Cerimonialista';
+  return email.split('@')[0] || 'Assessoria/Cerimonialista';
+}
+
+const SELF_VENDOR_CATEGORY = 'Assessoria/Cerimonialista';
+
 function getEventCoverImage(eventType?: string) {
   const type = (eventType ?? 'wedding').toLowerCase();
 
@@ -127,6 +134,21 @@ export function EventsPage() {
             'Erro ao criar checklist padrão do evento:',
             tasksInsertError
           );
+        }
+
+        const selfVendorName = getSelfVendorName(user?.email);
+        const { error: vendorInsertError } = await supabase
+          .from('event_vendors')
+          .insert([
+            {
+              event_id: createdEvent.id,
+              name: selfVendorName,
+              category: SELF_VENDOR_CATEGORY,
+              status: 'confirmed',
+            },
+          ]);
+        if (vendorInsertError) {
+          console.error('Erro ao criar fornecedor do usuario:', vendorInsertError);
         }
       }
 

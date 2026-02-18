@@ -114,12 +114,50 @@ export function FinanceiroPage() {
   const [expenses, setExpenses] = useState<FinanceExpense[]>([]);
   const [categories, setCategories] = useState<FinanceCategory[]>([]);
   const [teamRanking, setTeamRanking] = useState<TeamRankingRow[]>([]);
+  const [baseBalance, setBaseBalance] = useState(0);
+  const [balanceInput, setBalanceInput] = useState('0');
+  const [savingBalance, setSavingBalance] = useState(false);
+  const [formTab, setFormTab] = useState<'entradas' | 'saidas'>('saidas');
+  const [entryForm, setEntryForm] = useState({
+    title: '',
+    client_name: '',
+    amount: '',
+    status: 'confirmado' as FinanceEntry['status'],
+    received_at: '',
+    expected_at: '',
+    payment_method: '',
+    notes: '',
+  });
+  const [expenseForm, setExpenseForm] = useState({
+    title: '',
+    amount: '',
+    status: 'pendente' as FinanceExpense['status'],
+    paid_at: '',
+    expected_at: '',
+    category_id: '',
+    team_member_name: '',
+    team_member_role: '',
+    reason: '',
+    payment_method: '',
+    notes: '',
+  });
+  const [entryProof, setEntryProof] = useState<File | null>(null);
+  const [expenseProof, setExpenseProof] = useState<File | null>(null);
+  const [savingEntry, setSavingEntry] = useState(false);
+  const [savingExpense, setSavingExpense] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadFinance() {
       if (!user) return;
       setLoading(true);
+
+      const balanceRes = await supabase
+        .from('user_finance_balance')
+        .select('base_balance')
+        .eq('user_id', user.id)
+        .maybeSingle();
 
       const entriesRes = await supabase
         .from('user_finance_entries')
@@ -160,6 +198,11 @@ export function FinanceiroPage() {
       if (!entriesRes.error) setEntries(entriesRes.data ?? []);
       if (!expensesRes.error) setExpenses(expensesRes.data ?? []);
       if (!categoriesRes.error) setCategories(categoriesRes.data ?? []);
+      if (!balanceRes.error && balanceRes.data?.base_balance != null) {
+        const balanceValue = Number(balanceRes.data.base_balance) || 0;
+        setBaseBalance(balanceValue);
+        setBalanceInput(String(balanceValue));
+      }
 
       const rankingMap = new Map<string, { name: string; role: string | null; events: number }>();
       teamData.forEach((member) => {
@@ -189,6 +232,136 @@ export function FinanceiroPage() {
 
     loadFinance();
   }, [user]);
+
+  async function uploadProof(file: File, kind: 'entries' | 'expenses') {
+    if (!user) return null;
+    const path = `${user.id}/${kind}/${Date.now()}-${file.name}`;
+    const uploadRes = await supabase.storage
+      .from('finance-proofs')
+      .upload(path, file);
+    if (uploadRes.error) throw uploadRes.error;
+    const publicUrl = supabase.storage
+      .from('finance-proofs')
+      .getPublicUrl(path).data.publicUrl;
+    return publicUrl ?? null;
+  }
+
+  async function handleSaveBalance() {
+    if (!user) return;
+    setSavingBalance(true);
+    setActionError(null);
+    const value = Number(balanceInput.replace(',', '.')) || 0;
+    const res = await supabase
+      .from('user_finance_balance')
+      .upsert({ user_id: user.id, base_balance: value, updated_at: new Date().toISOString() })
+      .select('base_balance')
+      .maybeSingle();
+    if (res.error) {
+      setActionError('Nao foi possivel salvar o saldo.');
+    } else {
+      const saved = Number(res.data?.base_balance) || 0;
+      setBaseBalance(saved);
+      setBalanceInput(String(saved));
+    }
+    setSavingBalance(false);
+  }
+
+  async function handleCreateEntry(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    setSavingEntry(true);
+    setActionError(null);
+    try {
+      let proofUrl: string | null = null;
+      if (entryProof) {
+        proofUrl = await uploadProof(entryProof, 'entries');
+      }
+
+      const payload = {
+        user_id: user.id,
+        title: entryForm.title.trim(),
+        client_name: entryForm.client_name.trim() || null,
+        amount: Number(entryForm.amount.replace(',', '.')) || 0,
+        status: entryForm.status,
+        received_at: entryForm.received_at || null,
+        expected_at: entryForm.expected_at || null,
+        payment_method: entryForm.payment_method.trim() || null,
+        notes: entryForm.notes.trim() || null,
+        proof_url: proofUrl,
+      };
+
+      const res = await supabase.from('user_finance_entries').insert(payload).select('*');
+      if (res.error) throw res.error;
+      setEntries((prev) => [...(res.data ?? []), ...prev]);
+      setEntryForm({
+        title: '',
+        client_name: '',
+        amount: '',
+        status: 'confirmado',
+        received_at: '',
+        expected_at: '',
+        payment_method: '',
+        notes: '',
+      });
+      setEntryProof(null);
+    } catch (err) {
+      setActionError('Nao foi possivel salvar a entrada.');
+    } finally {
+      setSavingEntry(false);
+    }
+  }
+
+  async function handleCreateExpense(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    setSavingExpense(true);
+    setActionError(null);
+    try {
+      let proofUrl: string | null = null;
+      if (expenseProof) {
+        proofUrl = await uploadProof(expenseProof, 'expenses');
+      }
+
+      const payload = {
+        user_id: user.id,
+        title: expenseForm.title.trim(),
+        amount: Number(expenseForm.amount.replace(',', '.')) || 0,
+        status: expenseForm.status,
+        paid_at: expenseForm.paid_at || null,
+        expected_at: expenseForm.expected_at || null,
+        category_id: expenseForm.category_id || null,
+        category_label: null,
+        team_member_name: expenseForm.team_member_name.trim() || null,
+        team_member_role: expenseForm.team_member_role.trim() || null,
+        reason: expenseForm.reason.trim() || null,
+        payment_method: expenseForm.payment_method.trim() || null,
+        notes: expenseForm.notes.trim() || null,
+        proof_url: proofUrl,
+      };
+
+      const res = await supabase.from('user_finance_expenses').insert(payload).select('*');
+      if (res.error) throw res.error;
+      setExpenses((prev) => [...(res.data ?? []), ...prev]);
+      setExpenseForm({
+        title: '',
+        amount: '',
+        status: 'pendente',
+        paid_at: '',
+        expected_at: '',
+        category_id: '',
+        team_member_name: '',
+        team_member_role: '',
+        reason: '',
+        payment_method: '',
+        notes: '',
+      });
+      setExpenseProof(null);
+    } catch (err) {
+      setActionError('Nao foi possivel salvar a saida.');
+    } finally {
+      setSavingExpense(false);
+    }
+  }
 
   const cashflowSeries = useMemo(() => {
     const now = new Date();
@@ -327,11 +500,11 @@ export function FinanceiroPage() {
       .reduce((acc, expense) => acc + (Number(expense.amount) || 0), 0);
 
     return {
-      balance: totalEntries - totalExpenses,
+      balance: baseBalance + totalEntries - totalExpenses,
       confirmedEntries,
       plannedExpenses,
     };
-  }, [entries, expenses]);
+  }, [entries, expenses, baseBalance]);
 
   const insights = useMemo(() => {
     const expectedIn = entries
@@ -447,6 +620,257 @@ export function FinanceiroPage() {
               <PiggyBank className="w-6 h-6" />
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+          <h2 className="text-lg font-bold text-gray-900 mb-2">
+            Ajuste de saldo em caixa
+          </h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Use para registrar o saldo inicial ou correcoes pontuais.
+          </p>
+          <div className="flex items-center gap-3">
+            <input
+              type="number"
+              value={balanceInput}
+              onChange={(e) => setBalanceInput(e.target.value)}
+              className="flex-1 px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleSaveBalance}
+              disabled={savingBalance}
+              className="px-4 py-2 bg-gold-500 hover:bg-gold-600 text-white font-bold rounded-xl shadow-lg hover:shadow-gold-500/30 transition-all"
+            >
+              {savingBalance ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+          {actionError && (
+            <p className="text-xs text-red-600 mt-2">{actionError}</p>
+          )}
+        </div>
+
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">
+                Registrar movimentacoes
+              </h2>
+              <p className="text-sm text-gray-500">
+                Adicione entradas ou saidas com comprovantes.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setFormTab('entradas')}
+                className={`px-4 py-2 rounded-full text-sm font-semibold ${
+                  formTab === 'entradas'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-gray-100 text-gray-600'
+                }`}
+              >
+                Entradas
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormTab('saidas')}
+                className={`px-4 py-2 rounded-full text-sm font-semibold ${
+                  formTab === 'saidas'
+                    ? 'bg-red-100 text-red-700'
+                    : 'bg-gray-100 text-gray-600'
+                }`}
+              >
+                Saidas
+              </button>
+            </div>
+          </div>
+
+          {formTab === 'entradas' ? (
+            <form className="grid grid-cols-1 md:grid-cols-2 gap-4" onSubmit={handleCreateEntry}>
+              <input
+                type="text"
+                placeholder="Titulo"
+                value={entryForm.title}
+                onChange={(e) => setEntryForm((prev) => ({ ...prev, title: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+                required
+              />
+              <input
+                type="text"
+                placeholder="Cliente (opcional)"
+                value={entryForm.client_name}
+                onChange={(e) => setEntryForm((prev) => ({ ...prev, client_name: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <input
+                type="number"
+                placeholder="Valor"
+                value={entryForm.amount}
+                onChange={(e) => setEntryForm((prev) => ({ ...prev, amount: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+                required
+              />
+              <select
+                value={entryForm.status}
+                onChange={(e) => setEntryForm((prev) => ({ ...prev, status: e.target.value as FinanceEntry['status'] }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              >
+                <option value="confirmado">Confirmado</option>
+                <option value="pago">Pago</option>
+                <option value="pendente">Pendente</option>
+                <option value="previsto">Previsto</option>
+                <option value="parcelado">Parcelado</option>
+              </select>
+              <input
+                type="date"
+                placeholder="Recebido em"
+                value={entryForm.received_at}
+                onChange={(e) => setEntryForm((prev) => ({ ...prev, received_at: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <input
+                type="date"
+                placeholder="Previsto para"
+                value={entryForm.expected_at}
+                onChange={(e) => setEntryForm((prev) => ({ ...prev, expected_at: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <input
+                type="text"
+                placeholder="Metodo de pagamento"
+                value={entryForm.payment_method}
+                onChange={(e) => setEntryForm((prev) => ({ ...prev, payment_method: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={(e) => setEntryProof(e.target.files?.[0] ?? null)}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <textarea
+                placeholder="Observacoes"
+                value={entryForm.notes}
+                onChange={(e) => setEntryForm((prev) => ({ ...prev, notes: e.target.value }))}
+                className="md:col-span-2 px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <button
+                type="submit"
+                disabled={savingEntry}
+                className="md:col-span-2 px-4 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl shadow-lg hover:shadow-emerald-500/30 transition-all"
+              >
+                {savingEntry ? 'Salvando...' : 'Salvar entrada'}
+              </button>
+            </form>
+          ) : (
+            <form className="grid grid-cols-1 md:grid-cols-2 gap-4" onSubmit={handleCreateExpense}>
+              <input
+                type="text"
+                placeholder="Titulo"
+                value={expenseForm.title}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, title: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+                required
+              />
+              <input
+                type="number"
+                placeholder="Valor"
+                value={expenseForm.amount}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, amount: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+                required
+              />
+              <select
+                value={expenseForm.status}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, status: e.target.value as FinanceExpense['status'] }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              >
+                <option value="pendente">Pendente</option>
+                <option value="confirmado">Confirmado</option>
+                <option value="pago">Pago</option>
+                <option value="previsto">Previsto</option>
+                <option value="parcelado">Parcelado</option>
+              </select>
+              <select
+                value={expenseForm.category_id}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, category_id: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              >
+                <option value="">Categoria</option>
+                {categories
+                  .filter((cat) => cat.type === 'saida')
+                  .map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+              </select>
+              <input
+                type="date"
+                placeholder="Pago em"
+                value={expenseForm.paid_at}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, paid_at: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <input
+                type="date"
+                placeholder="Previsto para"
+                value={expenseForm.expected_at}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, expected_at: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <input
+                type="text"
+                placeholder="Nome da equipe"
+                value={expenseForm.team_member_name}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, team_member_name: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <input
+                type="text"
+                placeholder="Cargo"
+                value={expenseForm.team_member_role}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, team_member_role: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <input
+                type="text"
+                placeholder="Motivo/descricao"
+                value={expenseForm.reason}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, reason: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <input
+                type="text"
+                placeholder="Metodo de pagamento"
+                value={expenseForm.payment_method}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, payment_method: e.target.value }))}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={(e) => setExpenseProof(e.target.files?.[0] ?? null)}
+                className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <textarea
+                placeholder="Observacoes"
+                value={expenseForm.notes}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, notes: e.target.value }))}
+                className="md:col-span-2 px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+              />
+              <button
+                type="submit"
+                disabled={savingExpense}
+                className="md:col-span-2 px-4 py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl shadow-lg hover:shadow-red-500/30 transition-all"
+              >
+                {savingExpense ? 'Salvando...' : 'Salvar saida'}
+              </button>
+            </form>
+          )}
         </div>
       </div>
 

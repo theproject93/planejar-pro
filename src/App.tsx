@@ -42,6 +42,16 @@ const EventDetailsPage = lazy(() =>
     default: mod.EventDetailsPage,
   }))
 );
+const EventCommandCenterPage = lazy(() =>
+  import('./pages/EventCommandCenterPage').then((mod) => ({
+    default: mod.EventCommandCenterPage,
+  }))
+);
+const VendorCommandCenterPage = lazy(() =>
+  import('./pages/VendorCommandCenterPage').then((mod) => ({
+    default: mod.VendorCommandCenterPage,
+  }))
+);
 const FinanceiroPage = lazy(() =>
   import('./pages/FinanceiroPage').then((mod) => ({
     default: mod.FinanceiroPage,
@@ -287,6 +297,7 @@ function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/atendimento-ia" element={<AtendimentoIAPage />} />
+            <Route path="/torre/:token" element={<VendorCommandCenterPage />} />
             <Route
               path="/politica-de-privacidade"
               element={<PrivacyPolicyPage />}
@@ -303,6 +314,7 @@ function App() {
               <Route index element={<DashboardHome />} />
               <Route path="eventos" element={<EventsPage />} />
               <Route path="eventos/:id" element={<EventDetailsPage />} />
+              <Route path="eventos/:id/torre" element={<EventCommandCenterPage />} />
               <Route path="perfil" element={<ProfilePage />} />
               <Route
                 path="clientes"

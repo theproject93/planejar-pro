@@ -14,6 +14,7 @@ import {
   Zap,
   Camera,
   Bell,
+  Rocket,
 } from 'lucide-react';
 import {
   PieChart,
@@ -1724,13 +1725,23 @@ export function EventDetailsPage() {
             </div>
           </div>
 
-          <button
-            onClick={() => setIsEditModalOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-lg hover:shadow-lg transition-all"
-          >
-            <Edit2 className="w-4 h-4" />
-            Editar
-          </button>
+          <div className="flex items-center gap-3">
+            <Link
+              to={`/dashboard/eventos/${event.id}/torre`}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg shadow-lg hover:bg-red-700 transition-all animate-pulse"
+              title="Abrir Torre de Controle"
+            >
+              <Rocket className="w-4 h-4" />
+              Torre de Controle
+            </Link>
+            <button
+              onClick={() => setIsEditModalOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-lg hover:shadow-lg transition-all"
+            >
+              <Edit2 className="w-4 h-4" />
+              Editar
+            </button>
+          </div>
         </div>
 
         {/* Alertas */}

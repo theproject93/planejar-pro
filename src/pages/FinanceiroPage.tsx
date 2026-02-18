@@ -41,6 +41,7 @@ type FinanceEntry = {
   payment_method: string | null;
   proof_url: string | null;
   notes: string | null;
+  created_at?: string | null;
 };
 
 type FinanceExpense = {
@@ -59,6 +60,7 @@ type FinanceExpense = {
   payment_method: string | null;
   proof_url: string | null;
   notes: string | null;
+  created_at?: string | null;
   user_finance_categories?: {
     name: string;
     color: string | null;
@@ -479,7 +481,7 @@ export function FinanceiroPage() {
         id: entry.id,
         type: 'Entrada' as const,
         title: entry.title,
-        date: entry.received_at ?? entry.expected_at,
+        date: entry.received_at ?? entry.expected_at ?? entry.created_at ?? null,
         amount: Number(entry.amount) || 0,
         status: entry.status,
         proof_url: entry.proof_url,
@@ -488,7 +490,7 @@ export function FinanceiroPage() {
         id: expense.id,
         type: 'Saida' as const,
         title: expense.title,
-        date: expense.paid_at ?? expense.expected_at,
+        date: expense.paid_at ?? expense.expected_at ?? expense.created_at ?? null,
         amount: -(Number(expense.amount) || 0),
         status: expense.status,
         proof_url: expense.proof_url,
@@ -715,6 +717,7 @@ export function FinanceiroPage() {
                   setEntryForm((prev) => ({ ...prev, date: e.target.value }))
                 }
                 className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+                required
               />
               <input
                 type="text"
@@ -794,6 +797,7 @@ export function FinanceiroPage() {
                   setExpenseForm((prev) => ({ ...prev, date: e.target.value }))
                 }
                 className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gold-400 focus:border-transparent outline-none"
+                required
               />
               <select
                 value={expenseForm.team_member_name}

@@ -5,7 +5,7 @@ import {
   ArrowRight,
   Menu,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { acceptCookieConsent, hasCookieConsent } from '../lib/privacy';
 
 export function LandingPage() {
@@ -13,11 +13,45 @@ export function LandingPage() {
   const [showCookieBanner, setShowCookieBanner] = useState(
     () => !hasCookieConsent()
   );
+  const heroVideoRef = useRef<HTMLVideoElement | null>(null);
 
   function handleAcceptCookies() {
     acceptCookieConsent();
     setShowCookieBanner(false);
   }
+
+  function handleHeroVideoEnded() {
+    const video = heroVideoRef.current;
+    if (!video) return;
+    video.currentTime = 0;
+    void video.play().catch(() => {});
+  }
+
+  function handleHeroVideoPause() {
+    const video = heroVideoRef.current;
+    if (!video) return;
+    const isNearEnd =
+      Number.isFinite(video.duration) &&
+      video.duration > 0 &&
+      video.currentTime >= video.duration - 0.15;
+    if (!isNearEnd) return;
+    video.currentTime = 0;
+    void video.play().catch(() => {});
+  }
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      const video = heroVideoRef.current;
+      if (!video || document.hidden) return;
+      if (video.paused) {
+        void video.play().catch(() => {});
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () =>
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   return (
     <div className="min-h-screen bg-white font-sans text-gray-900 selection:bg-gold-200">
@@ -105,14 +139,17 @@ export function LandingPage() {
         {/* Vídeo Background (Mantivemos igual) */}
         <div className="absolute top-0 left-0 w-full h-full z-0">
           <video
+            ref={heroVideoRef}
             autoPlay
             loop
             muted
             playsInline
             preload="metadata"
+            onEnded={handleHeroVideoEnded}
+            onPause={handleHeroVideoPause}
+            onStalled={handleHeroVideoPause}
             className="absolute top-1/2 left-1/2 min-w-full min-h-full w-auto h-auto -translate-x-1/2 -translate-y-1/2 object-cover"
           >
-            <source src="/hero-video.webm" type="video/webm" />
             <source src="/hero-video.mp4" type="video/mp4" />
           </video>
           <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-black/80 via-black/50 to-black/80"></div>

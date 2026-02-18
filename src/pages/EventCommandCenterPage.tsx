@@ -237,6 +237,16 @@ export function EventCommandCenterPage() {
     return map;
   }, [statusRows]);
 
+  const statusHistoryByVendor = useMemo(() => {
+    const map = new Map<string, StatusRow[]>();
+    statusRows.forEach((row) => {
+      const current = map.get(row.vendor_id) ?? [];
+      current.push(row);
+      map.set(row.vendor_id, current);
+    });
+    return map;
+  }, [statusRows]);
+
   const computedAlerts = useMemo(() => {
     if (!event?.event_date) return [] as ComputedAlert[];
     const now = new Date();
@@ -769,6 +779,7 @@ export function EventCommandCenterPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {vendors.map((vendor, index) => {
               const latestUpdate = latestStatus.get(vendor.id);
+              const history = (statusHistoryByVendor.get(vendor.id) ?? []).slice(0, 6);
               const current = latestUpdate?.status ?? 'pending';
               const shareUrl = vendor.control_token
                 ? `${window.location.origin}/torre/${vendor.control_token}`
@@ -821,6 +832,31 @@ export function EventCommandCenterPage() {
                         {STATUS_LABEL[status]}
                       </button>
                     ))}
+                  </div>
+
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold text-gray-700 mb-2">
+                      Historico de atualizacoes
+                    </p>
+                    <div className="space-y-1.5 max-h-40 overflow-auto pr-1">
+                      {history.length === 0 && (
+                        <p className="text-xs text-gray-400">Sem atualizacoes ainda.</p>
+                      )}
+                      {history.map((row, idx) => (
+                        <div
+                          key={`${row.vendor_id}-${row.created_at}-${idx}`}
+                          className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5"
+                        >
+                          <span className="font-semibold text-gray-800">
+                            {STATUS_LABEL[row.status]}
+                          </span>{' '}
+                          • {new Date(row.created_at).toLocaleTimeString('pt-BR')}
+                          {' • '}
+                          {row.updated_by === 'fornecedor' ? 'fornecedor' : 'assessoria'}
+                          {row.note ? ` • ${row.note}` : ''}
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
                   {shareUrl && (

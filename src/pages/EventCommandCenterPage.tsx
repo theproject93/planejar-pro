@@ -73,6 +73,15 @@ type IncidentRow = {
     | null;
 };
 
+type CoupleUpdateRow = {
+  id: string;
+  event_id: string;
+  kind: 'info' | 'milestone' | 'celebration';
+  title: string;
+  message: string;
+  created_at: string;
+};
+
 type CommandConfig = {
   lead_minutes: number[];
   late_grace_minutes: number;
@@ -130,6 +139,7 @@ export function EventCommandCenterPage() {
   const [statusRows, setStatusRows] = useState<StatusRow[]>([]);
   const [storedAlerts, setStoredAlerts] = useState<AlertRow[]>([]);
   const [incidents, setIncidents] = useState<IncidentRow[]>([]);
+  const [coupleUpdates, setCoupleUpdates] = useState<CoupleUpdateRow[]>([]);
   const [config, setConfig] = useState<CommandConfig>({
     lead_minutes: [60, 30, 15],
     late_grace_minutes: 10,
@@ -143,6 +153,7 @@ export function EventCommandCenterPage() {
   const [tourOpen, setTourOpen] = useState(false);
   const [savingIncident, setSavingIncident] = useState(false);
   const [resolvingIncidentId, setResolvingIncidentId] = useState<string | null>(null);
+  const [savingCoupleUpdate, setSavingCoupleUpdate] = useState(false);
   const [incidentForm, setIncidentForm] = useState({
     vendor_id: '',
     severity: 'warning' as 'warning' | 'critical',
@@ -150,12 +161,25 @@ export function EventCommandCenterPage() {
     action_plan: '',
     note: '',
   });
+  const [coupleUpdateForm, setCoupleUpdateForm] = useState({
+    kind: 'info' as 'info' | 'milestone' | 'celebration',
+    title: '',
+    message: '',
+  });
 
   const loadData = useCallback(async () => {
     if (!eventId || !user) return;
     setLoading(true);
 
-    const [eventRes, vendorRes, statusRes, configRes, alertsRes, incidentsRes] =
+    const [
+      eventRes,
+      vendorRes,
+      statusRes,
+      configRes,
+      alertsRes,
+      incidentsRes,
+      coupleUpdatesRes,
+    ] =
       await Promise.all([
       supabase
         .from('events')
@@ -194,6 +218,12 @@ export function EventCommandCenterPage() {
         .eq('event_id', eventId)
         .order('created_at', { ascending: false })
         .limit(30),
+      supabase
+        .from('event_couple_updates')
+        .select('id, event_id, kind, title, message, created_at')
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false })
+        .limit(20),
     ]);
 
     if (!eventRes.error) setEvent(eventRes.data as EventRow);
@@ -201,6 +231,9 @@ export function EventCommandCenterPage() {
     if (!statusRes.error) setStatusRows((statusRes.data as StatusRow[]) ?? []);
     if (!alertsRes.error) setStoredAlerts((alertsRes.data as AlertRow[]) ?? []);
     if (!incidentsRes.error) setIncidents((incidentsRes.data as IncidentRow[]) ?? []);
+    if (!coupleUpdatesRes.error) {
+      setCoupleUpdates((coupleUpdatesRes.data as CoupleUpdateRow[]) ?? []);
+    }
 
     if (!configRes.error && configRes.data) {
       const loaded = configRes.data as CommandConfig;
@@ -327,6 +360,31 @@ export function EventCommandCenterPage() {
     return { open, resolved };
   }, [incidents]);
 
+  const tranquilidadeMensagem = useMemo(() => {
+    const criticalOpen = incidents.filter(
+      (incident) => incident.status === 'open' && incident.severity === 'critical'
+    ).length;
+    if (criticalOpen > 0) {
+      return 'A assessoria esta conduzindo ajustes internos e mantendo tudo sob controle.';
+    }
+    return 'Operacao fluindo conforme o planejado. Aproveitem cada momento.';
+  }, [incidents]);
+
+  const noivosFeed = useMemo(() => {
+    if (coupleUpdates.length > 0) return coupleUpdates.slice(0, 5);
+    return [
+      {
+        id: 'fallback-1',
+        event_id: eventId,
+        kind: 'milestone' as const,
+        title: 'Equipe em operacao',
+        message:
+          'Todos os fornecedores estao sendo acompanhados em tempo real pela assessoria.',
+        created_at: new Date().toISOString(),
+      },
+    ];
+  }, [coupleUpdates, eventId]);
+
   useEffect(() => {
     async function persistAlerts() {
       if (!eventId || alertsForView.length === 0) return;
@@ -423,6 +481,17 @@ export function EventCommandCenterPage() {
     setIncidents((data as IncidentRow[]) ?? []);
   }
 
+  async function refreshCoupleUpdates() {
+    if (!eventId) return;
+    const { data } = await supabase
+      .from('event_couple_updates')
+      .select('id, event_id, kind, title, message, created_at')
+      .eq('event_id', eventId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    setCoupleUpdates((data as CoupleUpdateRow[]) ?? []);
+  }
+
   async function createIncident() {
     if (!eventId || !user) return;
     const title = incidentForm.title.trim();
@@ -463,6 +532,30 @@ export function EventCommandCenterPage() {
       .eq('id', incidentId);
     setResolvingIncidentId(null);
     await refreshIncidents();
+  }
+
+  async function createCoupleUpdate() {
+    if (!eventId || !user) return;
+    const title = coupleUpdateForm.title.trim();
+    const message = coupleUpdateForm.message.trim();
+    if (!title || !message) return;
+
+    setSavingCoupleUpdate(true);
+    await supabase.from('event_couple_updates').insert({
+      event_id: eventId,
+      user_id: user.id,
+      kind: coupleUpdateForm.kind,
+      title,
+      message,
+    });
+
+    setCoupleUpdateForm({
+      kind: 'info',
+      title: '',
+      message: '',
+    });
+    setSavingCoupleUpdate(false);
+    await refreshCoupleUpdates();
   }
 
   if (loading) {
@@ -734,6 +827,76 @@ export function EventCommandCenterPage() {
                 </div>
               </div>
             </div>
+
+            <div className="mb-8 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <h2 className="text-lg font-bold text-gray-900">Comunicados para os noivos</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Publique atualizacoes positivas para o Modo Tranquilidade.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4">
+                <select
+                  value={coupleUpdateForm.kind}
+                  onChange={(e) =>
+                    setCoupleUpdateForm((prev) => ({
+                      ...prev,
+                      kind: e.target.value as 'info' | 'milestone' | 'celebration',
+                    }))
+                  }
+                  className="px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="info">Info</option>
+                  <option value="milestone">Marco</option>
+                  <option value="celebration">Celebracao</option>
+                </select>
+                <input
+                  value={coupleUpdateForm.title}
+                  onChange={(e) =>
+                    setCoupleUpdateForm((prev) => ({ ...prev, title: e.target.value }))
+                  }
+                  className="md:col-span-3 px-3 py-2 border border-gray-300 rounded-lg"
+                  placeholder="Titulo da atualizacao"
+                />
+                <textarea
+                  value={coupleUpdateForm.message}
+                  onChange={(e) =>
+                    setCoupleUpdateForm((prev) => ({ ...prev, message: e.target.value }))
+                  }
+                  className="md:col-span-4 px-3 py-2 border border-gray-300 rounded-lg"
+                  rows={3}
+                  placeholder="Mensagem para tranquilizar os noivos"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={createCoupleUpdate}
+                disabled={
+                  savingCoupleUpdate ||
+                  !coupleUpdateForm.title.trim() ||
+                  !coupleUpdateForm.message.trim()
+                }
+                className="mt-3 px-4 py-2 rounded-lg bg-emerald-600 text-white disabled:opacity-60"
+              >
+                {savingCoupleUpdate ? 'Publicando...' : 'Publicar no modo noivos'}
+              </button>
+
+              <div className="mt-4 space-y-2 max-h-56 overflow-auto pr-1">
+                {coupleUpdates.length === 0 && (
+                  <p className="text-sm text-gray-400">Nenhum comunicado publicado.</p>
+                )}
+                {coupleUpdates.slice(0, 6).map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2"
+                  >
+                    <p className="text-sm font-semibold text-gray-900">{item.title}</p>
+                    <p className="text-sm text-gray-600 mt-1">{item.message}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {item.kind} • {new Date(item.created_at).toLocaleString('pt-BR')}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
           </>
         )}
 
@@ -885,7 +1048,7 @@ export function EventCommandCenterPage() {
                 Tudo sob controle
               </div>
               <p className="text-sm mt-2">
-                A equipe esta cuidando de cada detalhe. O foco aqui e tranquilidade.
+                {tranquilidadeMensagem}
               </p>
             </div>
 
@@ -915,6 +1078,27 @@ export function EventCommandCenterPage() {
                 A producao esta sendo acompanhada em tempo real pela assessoria.
                 Aproveitem o evento.
               </p>
+            </div>
+
+            <div className="bg-white border border-gray-100 rounded-2xl p-6">
+              <h3 className="text-lg font-bold text-gray-900">Atualizacoes da assessoria</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Resumo positivo das etapas para voces curtirem tranquilos.
+              </p>
+              <div className="mt-4 space-y-3">
+                {noivosFeed.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-3"
+                  >
+                    <p className="text-sm font-semibold text-emerald-900">{item.title}</p>
+                    <p className="text-sm text-emerald-800 mt-1">{item.message}</p>
+                    <p className="text-xs text-emerald-700 mt-1">
+                      {new Date(item.created_at).toLocaleString('pt-BR')}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}

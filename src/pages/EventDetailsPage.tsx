@@ -153,6 +153,8 @@ type EventRow = {
   couple_photo_url: string | null;
   budget_total: number | null;
   guests_planned: number | null;
+  invite_message_template?: string | null;
+  invite_dress_code?: string | null;
   updated_at?: string | null;
 };
 
@@ -196,8 +198,12 @@ type GuestRow = {
   name: string;
   phone: string | null;
   confirmed: boolean;
+  rsvp_status?: 'pending' | 'confirmed' | 'declined' | null;
+  plus_one_count?: number | null;
+  dietary_restrictions?: string | null;
+  rsvp_note?: string | null;
   table_id?: string | null;
-  invite_token?: string;
+  invite_token?: string | null;
   created_at?: string;
 };
 
@@ -327,6 +333,16 @@ function normalizeText(value: string) {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizeGuestRsvpStatus(
+  guest: Pick<GuestRow, 'confirmed' | 'rsvp_status'>
+): 'pending' | 'confirmed' | 'declined' {
+  const status = (guest.rsvp_status ?? '').trim().toLowerCase();
+  if (status === 'confirmed' || status === 'declined' || status === 'pending') {
+    return status;
+  }
+  return guest.confirmed ? 'confirmed' : 'pending';
 }
 
 const PRIORITY_CONFIG = {
@@ -561,12 +577,16 @@ export function EventDetailsPage() {
     tasks.length > 0 ? (completedTasks / tasks.length) * 100 : 0;
 
   const confirmedGuests = useMemo(
-    () => guests.filter((g) => g.confirmed).length,
+    () => guests.filter((g) => normalizeGuestRsvpStatus(g) === 'confirmed').length,
+    [guests]
+  );
+  const pendingGuests = useMemo(
+    () => guests.filter((g) => normalizeGuestRsvpStatus(g) === 'pending').length,
     [guests]
   );
   const unconfirmedGuests = useMemo(
-    () => Math.max(guests.length - confirmedGuests, 0),
-    [guests.length, confirmedGuests]
+    () => pendingGuests,
+    [pendingGuests]
   );
 
   const displayName = useMemo(() => {
@@ -832,7 +852,7 @@ export function EventDetailsPage() {
           supabase
             .from(T_EVENTS)
             .select(
-              'id, user_id, name, event_type, event_date, location, status, couple, couple_photo_url, budget_total, guests_planned, updated_at'
+              'id, user_id, name, event_type, event_date, location, status, couple, couple_photo_url, budget_total, guests_planned, invite_message_template, invite_dress_code, updated_at'
             )
             .eq('id', eventId)
             .eq('user_id', user.id)
@@ -1311,6 +1331,31 @@ export function EventDetailsPage() {
     }
   }
 
+  async function updateInviteSettings(payload: {
+    invite_message_template: string;
+    invite_dress_code: string;
+  }) {
+    if (!event) return;
+
+    setErrorMsg(null);
+    try {
+      const updates = {
+        invite_message_template:
+          payload.invite_message_template.trim() || null,
+        invite_dress_code: payload.invite_dress_code.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      const res = await supabase.from(T_EVENTS).update(updates).eq('id', event.id);
+      if (res.error) throw res.error;
+
+      setEvent((prev) => (prev ? { ...prev, ...updates } : prev));
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao salvar configuracoes de convite.');
+      throw err;
+    }
+  }
+
   async function saveBudgetFromCard() {
     if (!event || !user || savingBudgetCard) return;
 
@@ -1451,6 +1496,7 @@ export function EventDetailsPage() {
           name,
           phone: phone || null,
           confirmed: false,
+          rsvp_status: 'pending',
         })
         .select('*')
         .single();
@@ -1471,21 +1517,55 @@ export function EventDetailsPage() {
   async function toggleGuest(guestId: string) {
     const g = guests.find((x) => x.id === guestId);
     if (!g) return;
+    const currentStatus = normalizeGuestRsvpStatus(g);
+    const nextStatus = currentStatus === 'confirmed' ? 'pending' : 'confirmed';
 
     try {
       const res = await supabase
         .from(T_GUESTS)
-        .update({ confirmed: !g.confirmed })
+        .update({ confirmed: nextStatus === 'confirmed', rsvp_status: nextStatus })
         .eq('id', guestId);
       if (res.error) throw res.error;
 
       setGuests((prev) =>
         prev.map((x) =>
-          x.id === guestId ? { ...x, confirmed: !x.confirmed } : x
+          x.id === guestId
+            ? { ...x, confirmed: nextStatus === 'confirmed', rsvp_status: nextStatus }
+            : x
         )
       );
     } catch (err: any) {
       setErrorMsg(err?.message ?? 'Erro ao atualizar confirmação.');
+    }
+  }
+
+  async function updateGuestStatus(
+    guestId: string,
+    status: 'pending' | 'confirmed' | 'declined'
+  ) {
+    try {
+      const res = await supabase
+        .from(T_GUESTS)
+        .update({
+          rsvp_status: status,
+          confirmed: status === 'confirmed',
+        })
+        .eq('id', guestId);
+      if (res.error) throw res.error;
+
+      setGuests((prev) =>
+        prev.map((guest) =>
+          guest.id === guestId
+            ? {
+                ...guest,
+                rsvp_status: status,
+                confirmed: status === 'confirmed',
+              }
+            : guest
+        )
+      );
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Erro ao atualizar status RSVP.');
     }
   }
 
@@ -1519,6 +1599,7 @@ export function EventDetailsPage() {
         name,
         phone: phone || null,
         confirmed: false,
+        rsvp_status: 'pending',
       }));
 
       const res = await supabase.from(T_GUESTS).insert(payload).select('*');
@@ -2443,6 +2524,7 @@ export function EventDetailsPage() {
             addGuest={addGuest}
             guests={guests}
             toggleGuest={toggleGuest}
+            updateGuestStatus={updateGuestStatus}
             deleteGuest={deleteGuest}
             fileInputRef={fileInputRef}
             importCSV={importCSV}
@@ -2633,7 +2715,12 @@ export function EventDetailsPage() {
         )}
 
         {activeTab === 'invites' && event && (
-          <InvitesTab event={event} guests={guests} />
+          <InvitesTab
+            event={event}
+            guests={guests}
+            baseInviteUrl={`${window.location.origin}/convite`}
+            onUpdateInviteSettings={updateInviteSettings}
+          />
         )}
 
         {/* Modal: editar básicos */}

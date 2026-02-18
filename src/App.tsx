@@ -52,6 +52,11 @@ const VendorCommandCenterPage = lazy(() =>
     default: mod.VendorCommandCenterPage,
   }))
 );
+const GuestInvitePage = lazy(() =>
+  import('./pages/GuestInvitePage').then((mod) => ({
+    default: mod.GuestInvitePage,
+  }))
+);
 const FinanceiroPage = lazy(() =>
   import('./pages/FinanceiroPage').then((mod) => ({
     default: mod.FinanceiroPage,
@@ -298,6 +303,7 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/atendimento-ia" element={<AtendimentoIAPage />} />
             <Route path="/torre/:token" element={<VendorCommandCenterPage />} />
+            <Route path="/convite/:token" element={<GuestInvitePage />} />
             <Route
               path="/politica-de-privacidade"
               element={<PrivacyPolicyPage />}

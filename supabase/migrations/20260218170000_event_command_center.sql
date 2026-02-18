@@ -4,6 +4,10 @@ alter table public.event_vendors
 create unique index if not exists event_vendors_control_token_key
   on public.event_vendors (control_token);
 
+update public.event_vendors
+set control_token = gen_random_uuid()
+where control_token is null;
+
 create table if not exists public.event_vendor_status (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events (id) on delete cascade,

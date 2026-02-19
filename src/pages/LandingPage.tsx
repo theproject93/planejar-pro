@@ -156,7 +156,7 @@ export function LandingPage() {
             transition={{ duration: 0.8, ease: 'easeOut' }}
           >
             <span className="bg-white/10 backdrop-blur-md text-gold-300 text-xs font-bold px-4 py-1.5 rounded-full mb-8 inline-block border border-gold-500/30 uppercase tracking-widest shadow-lg hover:bg-white/20 transition-colors cursor-default">
-              EXCLUSIVO PARA VOCÊ
+              TESTE GRÁTIS POR 30 DIAS
             </span>
           </motion.div>
 
@@ -189,7 +189,7 @@ export function LandingPage() {
             transition={{ duration: 0.8, delay: 0.6, ease: 'easeOut' }}
             className="flex flex-col space-y-4 sm:flex-row sm:justify-center sm:space-y-0 sm:space-x-6"
           >
-            <Link to="/atendimento-ia?origem=hero&plano=profissional">
+            <Link to="/cadastro">
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
@@ -325,7 +325,7 @@ export function LandingPage() {
 
           <ScrollReveal delay={0.5}>
             <div className="mt-10 text-center">
-              <Link to="/atendimento-ia?origem=sobre&plano=profissional">
+            <Link to="/cadastro">
                 <button
                   type="button"
                   className="inline-flex items-center justify-center rounded-xl bg-black px-8 py-3 text-sm font-semibold text-white hover:bg-gray-800 transition-colors"
@@ -405,6 +405,47 @@ export function LandingPage() {
         </div>
       </section>
 
+      <section className="py-20 bg-gray-50 border-y border-gray-100">
+        <div className="container mx-auto px-4">
+          <div className="max-w-5xl mx-auto">
+            <div className="text-center mb-10">
+              <span className="text-gold-500 font-semibold tracking-wider uppercase text-sm">
+                O que já vem pronto
+              </span>
+              <h2 className="text-3xl font-playfair font-bold text-gray-900 mt-2">
+                Plataforma completa para vender, organizar e entregar melhor
+              </h2>
+            </div>
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="rounded-2xl bg-white border border-gray-200 p-5">
+                <p className="font-semibold text-gray-900">CRM com pipeline comercial</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Prospecção, orçamento, contrato, assinatura e histórico do cliente.
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white border border-gray-200 p-5">
+                <p className="font-semibold text-gray-900">Operação do evento em tempo real</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Cronograma do dia, torre de controle, equipe e fornecedores em um painel.
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white border border-gray-200 p-5">
+                <p className="font-semibold text-gray-900">Links públicos inteligentes</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Convite RSVP, assinatura e portal dos noivos com experiência profissional.
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white border border-gray-200 p-5">
+                <p className="font-semibold text-gray-900">Segurança e governança</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Regras de acesso por usuário, monitoramento de saúde e proteção antiabuso.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="precos" className="py-24 bg-black text-white">
         <div className="container mx-auto px-4">
           <ScrollReveal width="100%">
@@ -415,6 +456,9 @@ export function LandingPage() {
               <h2 className="text-4xl font-playfair font-bold mt-2 mb-4">
                 Invista no sistema que acompanha o seu nível de entrega
               </h2>
+              <p className="text-sm text-gray-300">
+                Todos os planos começam com 30 dias grátis e acesso completo.
+              </p>
             </div>
           </ScrollReveal>
 
@@ -424,19 +468,16 @@ export function LandingPage() {
                 <p className="text-gold-300 text-sm font-semibold uppercase tracking-wider mb-4">
                   Essencial
                 </p>
-                <p className="text-4xl font-bold mb-1">R$ 59</p>
+                <p className="text-4xl font-bold mb-1">R$ 39</p>
                 <p className="text-sm text-gray-300 mb-6">/mês</p>
                 <ul className="space-y-3 text-sm text-gray-200 mb-8">
                   <li>Base completa para organizar cada evento</li>
                   <li>Checklist e cronograma com execução mais rápida</li>
                   <li>Controle financeiro essencial por evento</li>
                 </ul>
-                <Link
-                  to="/atendimento-ia?origem=precos&plano=essencial"
-                  className="inline-block w-full"
-                >
+                <Link to="/cadastro" className="inline-block w-full">
                   <button className="w-full rounded-lg border border-white/30 py-2.5 hover:bg-white/10 transition-colors">
-                    Começar agora
+                    Testar 30 dias grátis
                   </button>
                 </Link>
               </div>
@@ -450,19 +491,16 @@ export function LandingPage() {
                 <p className="text-gold-300 text-sm font-semibold uppercase tracking-wider mb-4">
                   Profissional
                 </p>
-                <p className="text-4xl font-bold mb-1">R$ 99</p>
+                <p className="text-4xl font-bold mb-1">R$ 59</p>
                 <p className="text-sm text-gray-300 mb-6">/mês</p>
                 <ul className="space-y-3 text-sm text-gray-100 mb-8">
                   <li>Tudo do Essencial + operação avançada</li>
                   <li>Gestão de equipe e fornecedores sem caos</li>
                   <li>Mais controle para quem já está crescendo</li>
                 </ul>
-                <Link
-                  to="/atendimento-ia?origem=precos&plano=profissional"
-                  className="inline-block w-full"
-                >
+                <Link to="/cadastro" className="inline-block w-full">
                   <button className="w-full rounded-lg bg-gold-400 py-2.5 font-semibold text-black hover:bg-gold-300 transition-colors">
-                    Assinar Agora
+                    Testar 30 dias grátis
                   </button>
                 </Link>
               </div>
@@ -473,19 +511,16 @@ export function LandingPage() {
                 <p className="text-gold-300 text-sm font-semibold uppercase tracking-wider mb-4">
                   Elite
                 </p>
-                <p className="text-4xl font-bold mb-1">R$ 149</p>
+                <p className="text-4xl font-bold mb-1">R$ 89</p>
                 <p className="text-sm text-gray-300 mb-6">/mês</p>
                 <ul className="space-y-3 text-sm text-gray-200 mb-8">
                   <li>Para equipes com operação intensa e multi-eventos</li>
                   <li>Gestão premium para padrão elevado de entrega</li>
                   <li>Prioridade no suporte e evolução contínua</li>
                 </ul>
-                <Link
-                  to="/atendimento-ia?origem=precos&plano=elite"
-                  className="inline-block w-full"
-                >
+                <Link to="/cadastro" className="inline-block w-full">
                   <button className="w-full rounded-lg border border-white/30 py-2.5 hover:bg-white/10 transition-colors">
-                    Falar com Vendas
+                    Começar no teste grátis
                   </button>
                 </Link>
               </div>

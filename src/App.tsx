@@ -28,6 +28,9 @@ const LandingPage = lazy(() =>
 const LoginPage = lazy(() =>
   import('./pages/LoginPage').then((mod) => ({ default: mod.LoginPage }))
 );
+const SignupPage = lazy(() =>
+  import('./pages/SignupPage').then((mod) => ({ default: mod.SignupPage }))
+);
 const PrivacyPolicyPage = lazy(() =>
   import('./pages/PrivacyPolicyPage').then((mod) => ({
     default: mod.PrivacyPolicyPage,
@@ -765,6 +768,7 @@ function App() {
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/cadastro" element={<SignupPage />} />
             <Route path="/atendimento-ia" element={<AtendimentoIAPage />} />
             <Route path="/torre/:token" element={<VendorCommandCenterPage />} />
             <Route path="/noivos/:token" element={<CouplePortalPage />} />

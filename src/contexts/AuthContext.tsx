@@ -1,18 +1,19 @@
-import {
+﻿import {
   createContext,
   useContext,
   useState,
   useEffect,
   type ReactNode,
 } from 'react';
-// GARANTA QUE O NOME AQUI BATE COM O ARQUIVO (Maiúscula/Minúscula)
-import { supabase } from '../lib/supabaseClient';
 import { type Session, type User } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabaseClient';
 
 interface AuthContextType {
   user: User | null;
   session: Session | null;
-  signIn: (email: string, password: string) => Promise<void>; // Mudou aqui
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string, name?: string) => Promise<void>;
+  signInWithProvider: (provider: 'google' | 'azure') => Promise<void>;
   signOut: () => Promise<void>;
   isAuthenticated: boolean;
   loading: boolean;
@@ -43,15 +44,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Login com Senha
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  };
+
+  const signUp = async (email: string, password: string, name?: string) => {
+    const { error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/dashboard`,
+        data: {
+          name: (name ?? '').trim(),
+          plan_interest: 'trial_30d',
+          trial_days: 30,
+        },
+      },
     });
 
     if (error) throw error;
-    // Se der certo, o onAuthStateChange já atualiza o user e session
+  };
+
+  const signInWithProvider = async (provider: 'google' | 'azure') => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/dashboard`,
+      },
+    });
+
+    if (error) throw error;
   };
 
   const signOut = async () => {
@@ -64,6 +87,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         session,
         signIn,
+        signUp,
+        signInWithProvider,
         signOut,
         isAuthenticated: !!user,
         loading,
@@ -76,7 +101,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context)
+  if (!context) {
     throw new Error('useAuth deve ser usado dentro de um AuthProvider');
+  }
   return context;
 }

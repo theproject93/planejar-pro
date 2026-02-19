@@ -61,6 +61,10 @@ Centralizar tarefas, convidados, mesas, orçamento e informações do evento em 
   - `docs/stabilization/uat-real-scenario-runbook.md`
 - Template de fricções UAT:
   - `docs/stabilization/uat-friction-log-template.md`
+- Release estável (Dia 14):
+  - `docs/stabilization/release-stable-2026-02-19.md`
+- Política de backlog pós-estabilização:
+  - `docs/stabilization/post-stabilization-backlog-policy.md`
 - Script de sanity check pos-migration:
   - `scripts/sanity-check.ps1`
   - Execucao completa: `.\scripts\sanity-check.ps1`

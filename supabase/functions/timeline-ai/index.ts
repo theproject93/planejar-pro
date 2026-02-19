@@ -1,3 +1,5 @@
+import { createClient } from 'npm:@supabase/supabase-js@2';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
@@ -153,6 +155,25 @@ Deno.serve(async (request) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return errorResponse(500, 'server_misconfigured');
+    }
+
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader) {
+      return errorResponse(401, 'missing_authorization');
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData?.user) {
+      return errorResponse(401, 'unauthorized');
+    }
+
     const payload = (await request.json()) as TimelinePayload;
     const suggestions = await runCloudflareAi(payload);
     return new Response(JSON.stringify({ suggestions }), {

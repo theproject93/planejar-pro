@@ -1,3 +1,5 @@
+import { createClient } from 'npm:@supabase/supabase-js@2';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
@@ -74,6 +76,25 @@ Deno.serve(async (request) => {
     return jsonResponse(405, { error: 'method_not_allowed' });
   }
 
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return jsonResponse(500, { error: 'server_misconfigured' });
+  }
+
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) {
+    return jsonResponse(401, { error: 'missing_authorization' });
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: authHeader } },
+  });
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError || !authData?.user) {
+    return jsonResponse(401, { error: 'unauthorized' });
+  }
+
   const accountId = Deno.env.get('CLOUDFLARE_ACCOUNT_ID');
   const apiToken = Deno.env.get('CLOUDFLARE_API_TOKEN');
   if (!accountId || !apiToken) {
@@ -134,4 +155,3 @@ Deno.serve(async (request) => {
     return jsonResponse(500, { error: 'unexpected_error' });
   }
 });
-

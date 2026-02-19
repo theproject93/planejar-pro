@@ -55,6 +55,8 @@ Centralizar tarefas, convidados, mesas, orçamento e informações do evento em 
   - `docs/stabilization/crm-data-map.md`
 - Guia curto de suporte/triage:
   - `docs/stabilization/support-triage-guide.md`
+- Auditoria de performance/mobile:
+  - `docs/stabilization/performance-mobile-audit.md`
 - Script de sanity check pos-migration:
   - `scripts/sanity-check.ps1`
   - Execucao completa: `.\scripts\sanity-check.ps1`

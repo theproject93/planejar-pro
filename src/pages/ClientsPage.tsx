@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import { Bot, Loader2, Plus, Save, Search, Send, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
@@ -409,6 +409,7 @@ export function ClientsPage() {
   });
   const [portfolioMessage, setPortfolioMessage] = useState('');
   const [sendingPortfolio, setSendingPortfolio] = useState(false);
+  const hasSyncedEventsRef = useRef(false);
 
   const reload = useCallback(async () => {
     if (!user?.id) return;
@@ -422,37 +423,40 @@ export function ClientsPage() {
     const { data: pwData } = await supabase.rpc('get_crm_priority_weights');
     setPriorityWeights((pwData ?? []) as PriorityWeight[]);
 
-    const { data: eventsData } = await supabase
-      .from('events')
-      .select('name,couple,event_date')
-      .eq('user_id', user.id)
-      .or('status.is.null,status.neq.deleted');
+    if (!hasSyncedEventsRef.current) {
+      const { data: eventsData } = await supabase
+        .from('events')
+        .select('name,couple,event_date')
+        .eq('user_id', user.id)
+        .or('status.is.null,status.neq.deleted');
 
-    if (Array.isArray(eventsData) && eventsData.length > 0) {
-      const existingNames = new Set(allClients.map((c) => n(c.name)));
-      const importPayload = eventsData
-        .map((e: any) => ({
-          name: (e.couple || e.name || '').trim(),
-          event_date_expected: e.event_date || null,
-        }))
-        .filter((e: any) => e.name && !existingNames.has(n(e.name)))
-        .map((e: any) => ({
-          user_id: user.id,
-          name: e.name,
-          stage: 'cliente_fechado',
-          event_date_expected: e.event_date_expected,
-          notes: 'Importado automaticamente de evento existente.',
-        }));
+      if (Array.isArray(eventsData) && eventsData.length > 0) {
+        const existingNames = new Set(allClients.map((c) => n(c.name)));
+        const importPayload = eventsData
+          .map((e: any) => ({
+            name: (e.couple || e.name || '').trim(),
+            event_date_expected: e.event_date || null,
+          }))
+          .filter((e: any) => e.name && !existingNames.has(n(e.name)))
+          .map((e: any) => ({
+            user_id: user.id,
+            name: e.name,
+            stage: 'cliente_fechado',
+            event_date_expected: e.event_date_expected,
+            notes: 'Importado automaticamente de evento existente.',
+          }));
 
-      if (importPayload.length > 0) {
-        await supabase.from('crm_clients').insert(importPayload);
-        const { data: cDataRefetch } = await supabase
-          .from('crm_clients')
-          .select('id,user_id,name,email,phone,stage,event_type,event_date_expected,budget_expected,notes')
-          .eq('user_id', user.id)
-          .order('updated_at', { ascending: false });
-        allClients = (cDataRefetch ?? []) as CRMClient[];
+        if (importPayload.length > 0) {
+          await supabase.from('crm_clients').insert(importPayload);
+          const { data: cDataRefetch } = await supabase
+            .from('crm_clients')
+            .select('id,user_id,name,email,phone,stage,event_type,event_date_expected,budget_expected,notes')
+            .eq('user_id', user.id)
+            .order('updated_at', { ascending: false });
+          allClients = (cDataRefetch ?? []) as CRMClient[];
+        }
       }
+      hasSyncedEventsRef.current = true;
     }
     const ids = allClients.map((c) => c.id);
     if (!ids.length) {
@@ -603,6 +607,16 @@ export function ClientsPage() {
       ),
     [list]
   );
+
+  const stageBuckets = useMemo(() => {
+    return STAGES.reduce(
+      (acc, stage) => {
+        acc[stage.value] = list.filter((c) => c.stage === stage.value);
+        return acc;
+      },
+      {} as Record<Stage, CRMClient[]>
+    );
+  }, [list]);
 
   const selected = useMemo(
     () => clients.find((c) => c.id === selectedId) ?? null,
@@ -1873,8 +1887,7 @@ export function ClientsPage() {
                 <span className="text-xs text-gray-500">{stageCount[stage.value] ?? 0}</span>
               </div>
               <div className="space-y-1.5 mt-2">
-                {list
-                  .filter((c) => c.stage === stage.value)
+                {(stageBuckets[stage.value] ?? [])
                   .slice(0, 4)
                   .map((c) => (
                     <button
@@ -1890,7 +1903,7 @@ export function ClientsPage() {
                       <p className="text-[11px] text-gray-500 truncate">{c.email || c.phone || 'sem contato'}</p>
                     </button>
                   ))}
-                {list.filter((c) => c.stage === stage.value).length === 0 && (
+                {(stageBuckets[stage.value]?.length ?? 0) === 0 && (
                   <p className="text-[11px] text-gray-500">Sem clientes neste estÃ¡gio.</p>
                 )}
               </div>
@@ -1941,13 +1954,11 @@ export function ClientsPage() {
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-900">Conhecendo cliente (prospeccao)</h2>
           <p className="text-xs text-gray-500">
-            {list.filter((c) => c.stage === 'conhecendo_cliente').length} em prospeccao
+            {(stageBuckets.conhecendo_cliente?.length ?? 0)} em prospeccao
           </p>
         </div>
         <div className="space-y-2">
-          {list
-            .filter((c) => c.stage === 'conhecendo_cliente')
-            .map((c) => (
+          {(stageBuckets.conhecendo_cliente ?? []).map((c) => (
               <button
                 key={c.id}
                 onClick={() => openProspectModal(c)}
@@ -1957,7 +1968,7 @@ export function ClientsPage() {
                 <p className="text-xs text-gray-500">{c.email || c.phone || 'sem contato'}</p>
               </button>
             ))}
-          {list.filter((c) => c.stage === 'conhecendo_cliente').length === 0 && (
+          {(stageBuckets.conhecendo_cliente?.length ?? 0) === 0 && (
             <p className="text-sm text-gray-500">Sem clientes em prospecÃ§Ã£o no momento.</p>
           )}
         </div>
@@ -1969,7 +1980,7 @@ export function ClientsPage() {
             <div key={s.value} className="rounded-xl border border-gray-100 p-2">
               <p className="text-xs font-semibold text-gray-500">{s.label}</p>
               <div className="mt-2 space-y-1.5">
-                {list.filter((c) => c.stage === s.value).map((c) => (
+                {(stageBuckets[s.value] ?? []).map((c) => (
                   <button key={c.id} onClick={() => setSelectedId(c.id)} className={`w-full text-left px-2 py-2 rounded-lg border ${selectedId === c.id ? 'border-violet-300 bg-violet-50' : 'border-gray-100 hover:bg-gray-50'}`}>
                     <p className="text-sm font-semibold text-gray-900 truncate">{c.name}</p>
                     <p className="text-xs text-gray-500 truncate">{c.email || c.phone || 'sem contato'}</p>
@@ -2920,4 +2931,5 @@ export function ClientsPage() {
     </div>
   );
 }
+
 

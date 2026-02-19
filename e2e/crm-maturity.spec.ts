@@ -8,6 +8,14 @@ async function openClientsPage(page: Page) {
 }
 
 test.describe('CRM maturity smoke', () => {
+  test('requires E2E credentials in CI', async () => {
+    test.skip(!process.env.CI, 'Only enforced in CI.');
+    expect(
+      hasE2ECredentials(),
+      'CI must define E2E_EMAIL and E2E_PASSWORD secrets.'
+    ).toBeTruthy();
+  });
+
   test('redirects anonymous user to login', async ({ page }) => {
     await page.goto('/dashboard/clientes');
     await page.waitForURL(/\/login/);

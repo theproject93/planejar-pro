@@ -1,13 +1,13 @@
-# PlanejarPro
+﻿# PlanejarPro
 
-Plataforma web para planejamento e gestão de eventos (voltada para cerimonial/organização), com login, dashboard e gestão de eventos/detalhes. [cite:24][cite:23]
+Plataforma web para planejamento e gestÃ£o de eventos (voltada para cerimonial/organizaÃ§Ã£o), com login, dashboard e gestÃ£o de eventos/detalhes. [cite:24][cite:23]
 
 ## Objetivo
-Centralizar tarefas, convidados, mesas, orçamento e informações do evento em um só lugar, com uma experiência simples (dashboard → evento → abas de detalhes). [cite:24][cite:27]
+Centralizar tarefas, convidados, mesas, orÃ§amento e informaÃ§Ãµes do evento em um sÃ³ lugar, com uma experiÃªncia simples (dashboard â†’ evento â†’ abas de detalhes). [cite:24][cite:27]
 
 ## Stack
 - React + TypeScript + Vite [cite:16]
-- React Router (rotas públicas e protegidas) [cite:24]
+- React Router (rotas pÃºblicas e protegidas) [cite:24]
 - Supabase (Auth + banco) [cite:16][cite:23]
 - Tailwind (via @tailwindcss/vite) [cite:16]
 
@@ -19,20 +19,20 @@ Centralizar tarefas, convidados, mesas, orçamento e informações do evento em 
 - `/dashboard/eventos/:id` detalhes do evento [cite:24]
 
 ## Features (status)
-### Já existe
+### JÃ¡ existe
 - Landing page [cite:24]
-- Login/cadastro e sessão (AuthContext + rota protegida) [cite:24]
-- Dashboard com visão geral (contagem de eventos, próximo evento, orçamento agregado) [cite:24]
-- CRUD/gestão de eventos + tela de detalhes do evento [cite:24]
-- Abas no detalhe do evento (ex.: tarefas, orçamento, convidados, mesas, mapa visual etc.) [cite:27]
+- Login/cadastro e sessÃ£o (AuthContext + rota protegida) [cite:24]
+- Dashboard com visÃ£o geral (contagem de eventos, prÃ³ximo evento, orÃ§amento agregado) [cite:24]
+- CRUD/gestÃ£o de eventos + tela de detalhes do evento [cite:24]
+- Abas no detalhe do evento (ex.: tarefas, orÃ§amento, convidados, mesas, mapa visual etc.) [cite:27]
 
 ### Em progresso / melhoria
-- Padronização de schema (snake_case) e tipagem consistente entre front e Supabase. [cite:23]
-- Melhorar “estado vazio”, loading e feedback de erro por aba. [cite:27]
+- PadronizaÃ§Ã£o de schema (snake_case) e tipagem consistente entre front e Supabase. [cite:23]
+- Melhorar â€œestado vazioâ€, loading e feedback de erro por aba. [cite:27]
 
 ## Como rodar localmente
 1) `npm install`
-2) Copie `.env.example` → `.env` e preencha: [cite:23]
+2) Copie `.env.example` â†’ `.env` e preencha: [cite:23]
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
 3) `npm run dev` [cite:16]
@@ -59,13 +59,15 @@ Centralizar tarefas, convidados, mesas, orçamento e informações do evento em 
   - `docs/stabilization/performance-mobile-audit.md`
 - Runbook UAT real (prospect -> fechamento):
   - `docs/stabilization/uat-real-scenario-runbook.md`
-- Template de fricções UAT:
+- Template de friccoes UAT:
   - `docs/stabilization/uat-friction-log-template.md`
-- Release estável (Dia 14):
+- Relatorio da rodada UAT (2026-02-19):
+  - `docs/stabilization/uat-session-2026-02-19.md`
+- Release estavel (Dia 14):
   - `docs/stabilization/release-stable-2026-02-19.md`
-- Política de backlog pós-estabilização:
+- Politica de backlog pos-estabilizacao:
   - `docs/stabilization/post-stabilization-backlog-policy.md`
-- Backlog P1 inicial pós-estabilização:
+- Backlog P1 inicial pos-estabilizacao:
   - `docs/stabilization/post-stabilization-p1-backlog.md`
 - Script de sanity check pos-migration:
   - `scripts/sanity-check.ps1`
@@ -88,7 +90,7 @@ Centralizar tarefas, convidados, mesas, orçamento e informações do evento em 
   - `E2E_PASSWORD`
 
 ## Deploy (SPA)
-Há um `public/_redirects` para suporte a rotas SPA em hosts como Netlify. [cite:20]
+HÃ¡ um `public/_redirects` para suporte a rotas SPA em hosts como Netlify. [cite:20]
 
 ## Supabase (operacao)
 - Schemas de referencia:

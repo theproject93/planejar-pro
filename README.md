@@ -49,6 +49,10 @@ Centralizar tarefas, convidados, mesas, orÃ§amento e informaÃ§Ãµes do even
 ## Estabilizacao (14 dias)
 - Checklist de aceite dos fluxos criticos:
   - `docs/stabilization/critical-flows-acceptance-checklist.md`
+- Checklist Go/No-Go de release:
+  - `docs/stabilization/release-go-no-go-checklist.md`
+- Checklist diario de operacao:
+  - `docs/stabilization/daily-operations-checklist.md`
 - Playbook de deploy/rollback:
   - `docs/stabilization/deploy-rollback-playbook.md`
 - Mapa de dados CRM:

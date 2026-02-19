@@ -1,4 +1,4 @@
-﻿create index if not exists telemetry_events_event_created_idx
+create index if not exists telemetry_events_event_created_idx
   on public.telemetry_events (event_name, created_at desc);
 
 drop function if exists public.get_operational_health_dashboard(integer);

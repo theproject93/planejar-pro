@@ -49,6 +49,12 @@ Centralizar tarefas, convidados, mesas, orçamento e informações do evento em 
 ## Estabilizacao (14 dias)
 - Checklist de aceite dos fluxos criticos:
   - `docs/stabilization/critical-flows-acceptance-checklist.md`
+- Playbook de deploy/rollback:
+  - `docs/stabilization/deploy-rollback-playbook.md`
+- Mapa de dados CRM:
+  - `docs/stabilization/crm-data-map.md`
+- Guia curto de suporte/triage:
+  - `docs/stabilization/support-triage-guide.md`
 - Script de sanity check pos-migration:
   - `scripts/sanity-check.ps1`
   - Execucao completa: `.\scripts\sanity-check.ps1`

@@ -57,6 +57,10 @@ Centralizar tarefas, convidados, mesas, orçamento e informações do evento em 
   - `docs/stabilization/support-triage-guide.md`
 - Auditoria de performance/mobile:
   - `docs/stabilization/performance-mobile-audit.md`
+- Runbook UAT real (prospect -> fechamento):
+  - `docs/stabilization/uat-real-scenario-runbook.md`
+- Template de fricções UAT:
+  - `docs/stabilization/uat-friction-log-template.md`
 - Script de sanity check pos-migration:
   - `scripts/sanity-check.ps1`
   - Execucao completa: `.\scripts\sanity-check.ps1`

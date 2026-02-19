@@ -61,7 +61,8 @@ test.describe('CRM maturity smoke', () => {
       .filter({ hasText: 'Conhecendo cliente (prospeccao)' });
     await prospectSection.getByRole('button', { name: new RegExp(leadName) }).click();
 
-    await page.getByRole('button', { name: /Preparar orcamento|Preparar orçamento/i }).click();
+    await expect(page.getByRole('heading', { name: /Prospeccao do cliente/i })).toBeVisible();
+    await page.getByRole('button', { name: /Preparar/i }).click();
     await expect(page.getByText('Orcamento (Word/PDF)')).toBeVisible();
 
     const stageSelect = page.locator('select').first();

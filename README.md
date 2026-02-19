@@ -65,6 +65,8 @@ Centralizar tarefas, convidados, mesas, orçamento e informações do evento em 
   - `docs/stabilization/release-stable-2026-02-19.md`
 - Política de backlog pós-estabilização:
   - `docs/stabilization/post-stabilization-backlog-policy.md`
+- Backlog P1 inicial pós-estabilização:
+  - `docs/stabilization/post-stabilization-p1-backlog.md`
 - Script de sanity check pos-migration:
   - `scripts/sanity-check.ps1`
   - Execucao completa: `.\scripts\sanity-check.ps1`

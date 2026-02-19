@@ -81,4 +81,34 @@ test.describe('CRM maturity smoke', () => {
     await stageSelect.selectOption('cliente_fechado');
     await expect(stageSelect).toHaveValue('cliente_fechado');
   });
+
+  test('autofills portfolio sender contacts from profile', async ({ page }) => {
+    test.skip(!hasE2ECredentials(), 'Set E2E_EMAIL and E2E_PASSWORD to run authenticated tests.');
+
+    const officialName = `E2E Perfil ${Date.now()}`;
+    const officialWhatsapp = '+55 11 98888-7777';
+    const officialEmail = `e2e.perfil.${Date.now()}@mail.com`;
+    const officialInstagram = '@e2eperfil';
+
+    await loginViaUI(page);
+    await page.goto('/dashboard/perfil');
+    await expect(page.getByRole('heading', { name: 'Meu Perfil' })).toBeVisible();
+
+    await page.getByPlaceholder('Nome completo').fill(officialName);
+    await page.getByPlaceholder('Ex.: +55 11 99999-9999').fill(officialWhatsapp);
+    await page.getByPlaceholder('contato@seunegocio.com').fill(officialEmail);
+    await page.getByPlaceholder('@seuperfil').fill(officialInstagram);
+    await page.getByRole('button', { name: /Salvar alteracoes|Salvando.../ }).click();
+    await expect(page.getByText('Perfil atualizado com sucesso!')).toBeVisible();
+
+    await page.goto('/dashboard/clientes');
+    await expect(page.getByRole('heading', { name: 'Meus Clientes' })).toBeVisible();
+    await page.getByRole('button', { name: 'Portfolio' }).click();
+    await expect(page.getByRole('heading', { name: 'Portfolio' })).toBeVisible();
+
+    await expect(page.getByPlaceholder('Seu nome')).toHaveValue(officialName);
+    await expect(page.getByPlaceholder('Seu WhatsApp')).toHaveValue(officialWhatsapp);
+    await expect(page.getByPlaceholder('Seu e-mail')).toHaveValue(officialEmail);
+    await expect(page.getByPlaceholder('Seu Instagram')).toHaveValue(officialInstagram);
+  });
 });

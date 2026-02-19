@@ -410,6 +410,15 @@ export function ClientsPage() {
   const [portfolioMessage, setPortfolioMessage] = useState('');
   const [sendingPortfolio, setSendingPortfolio] = useState(false);
   const hasSyncedEventsRef = useRef(false);
+  const portfolioSenderDefaults = useMemo(() => {
+    const metadata = (user?.user_metadata as Record<string, any> | undefined) ?? {};
+    return {
+      name: String(metadata.name ?? '').trim(),
+      email: String(metadata.official_email ?? user?.email ?? '').trim(),
+      whatsapp: String(metadata.official_whatsapp ?? '').trim(),
+      instagram: String(metadata.official_instagram ?? '').trim(),
+    };
+  }, [user]);
 
   const reload = useCallback(async () => {
     if (!user?.id) return;
@@ -1469,9 +1478,19 @@ export function ClientsPage() {
     await reload();
   }
 
-  function openPortfolioModal() {
+  async function openPortfolioModal() {
     setPortfolioLead({ name: '', email: '', whatsapp: '' });
-    setPortfolioSender({ name: '', email: '', whatsapp: '', instagram: '' });
+    const { data } = await supabase.auth.getUser();
+    const freshMeta =
+      (data.user?.user_metadata as Record<string, any> | undefined) ??
+      (user?.user_metadata as Record<string, any> | undefined) ??
+      {};
+    setPortfolioSender({
+      name: String(freshMeta.name ?? portfolioSenderDefaults.name).trim(),
+      email: String(freshMeta.official_email ?? data.user?.email ?? portfolioSenderDefaults.email).trim(),
+      whatsapp: String(freshMeta.official_whatsapp ?? portfolioSenderDefaults.whatsapp).trim(),
+      instagram: String(freshMeta.official_instagram ?? portfolioSenderDefaults.instagram).trim(),
+    });
     setPortfolioPdfFile(null);
     setIsPortfolioModalOpen(true);
   }
@@ -2533,7 +2552,7 @@ export function ClientsPage() {
                     Seus contatos (cerimonialista)
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Esses campos serao preenchidos automaticamente pelo menu Perfil no futuro.
+                    Campos preenchidos automaticamente com os contatos oficiais do menu Perfil.
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
                     <input

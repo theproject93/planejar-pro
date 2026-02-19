@@ -524,6 +524,7 @@ export function EventDetailsPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   const [loading, setLoading] = useState(true);
+  const [loadingTabData, setLoadingTabData] = useState(false);
   const [savingBasics, setSavingBasics] = useState(false);
   const [savingBudgetCard, setSavingBudgetCard] = useState(false);
   const [isBudgetCardEditing, setIsBudgetCardEditing] = useState(false);
@@ -545,6 +546,12 @@ export function EventDetailsPage() {
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [team, setTeam] = useState<TeamMemberRow[]>([]);
   const [tables, setTables] = useState<TableRow[]>([]);
+  const [loadedTabData, setLoadedTabData] = useState({
+    documents: false,
+    notes: false,
+    team: false,
+    tables: false,
+  });
   const [aiTimelineSuggestions, setAiTimelineSuggestions] = useState<
     SmartTimelineSuggestion[]
   >([]);
@@ -1193,21 +1200,15 @@ export function EventDetailsPage() {
 
       setLoading(true);
       setErrorMsg(null);
+      setLoadedTabData({
+        documents: false,
+        notes: false,
+        team: false,
+        tables: false,
+      });
 
       try {
-        const [
-          eventRes,
-          tasksRes,
-          expensesRes,
-          paymentsRes,
-          guestsRes,
-          timelineRes,
-          vendorsRes,
-          docsRes,
-          notesRes,
-          teamRes,
-          tablesRes,
-        ] = await Promise.all([
+        const [eventRes, tasksRes, expensesRes, paymentsRes, guestsRes, timelineRes, vendorsRes] = await Promise.all([
           supabase
             .from(T_EVENTS)
             .select(
@@ -1246,26 +1247,6 @@ export function EventDetailsPage() {
             .select('*')
             .eq('event_id', eventId)
             .order('created_at', { ascending: true }),
-          supabase
-            .from(T_DOCUMENTS)
-            .select('*')
-            .eq('event_id', eventId)
-            .order('created_at', { ascending: false }),
-          supabase
-            .from(T_NOTES)
-            .select('*')
-            .eq('event_id', eventId)
-            .order('created_at', { ascending: false }),
-          supabase
-            .from(T_TEAM)
-            .select('*')
-            .eq('event_id', eventId)
-            .order('name', { ascending: true }),
-          supabase
-            .from(T_TABLES)
-            .select('*')
-            .eq('event_id', eventId)
-            .order('created_at', { ascending: true }),
         ]);
 
         if (eventRes.error) throw eventRes.error;
@@ -1275,10 +1256,6 @@ export function EventDetailsPage() {
         if (guestsRes.error) throw guestsRes.error;
         if (timelineRes.error) throw timelineRes.error;
         if (vendorsRes.error) throw vendorsRes.error;
-        if (docsRes.error) throw docsRes.error;
-        if (notesRes.error) throw notesRes.error;
-        if (teamRes.error) throw teamRes.error;
-        if (tablesRes.error) throw tablesRes.error;
 
         if (cancelled) return;
 
@@ -1335,10 +1312,10 @@ export function EventDetailsPage() {
         setGuests((guestsRes.data as GuestRow[]) ?? []);
         setTimeline((timelineRes.data as TimelineRow[]) ?? []);
         setVendors((vendorsRes.data as VendorRow[]) ?? []);
-        setDocuments((docsRes.data as DocumentRow[]) ?? []);
-        setNotes((notesRes.data as NoteRow[]) ?? []);
-        setTeam((teamRes.data as TeamMemberRow[]) ?? []);
-        setTables((tablesRes.data as TableRow[]) ?? []);
+        setDocuments([]);
+        setNotes([]);
+        setTeam([]);
+        setTables([]);
       } catch (err: any) {
         if (cancelled) return;
         setErrorMsg(err?.message ?? 'Erro ao carregar dados do evento.');
@@ -1353,6 +1330,111 @@ export function EventDetailsPage() {
       cancelled = true;
     };
   }, [eventId, user]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTabDataOnDemand() {
+      if (!eventId || !user) return;
+
+      const shouldLoadDocuments =
+        (activeTab === 'documents' ||
+          activeTab === 'vendors' ||
+          activeTab === 'budget' ||
+          activeTab === 'history') &&
+        !loadedTabData.documents;
+      const shouldLoadNotes = activeTab === 'notes' && !loadedTabData.notes;
+      const shouldLoadTeam = activeTab === 'team' && !loadedTabData.team;
+      const shouldLoadTables = activeTab === 'tables' && !loadedTabData.tables;
+
+      if (!shouldLoadDocuments && !shouldLoadNotes && !shouldLoadTeam && !shouldLoadTables) {
+        return;
+      }
+
+      setLoadingTabData(true);
+      try {
+        const promises: PromiseLike<any>[] = [];
+        if (shouldLoadDocuments) {
+          promises.push(
+            supabase
+              .from(T_DOCUMENTS)
+              .select('*')
+              .eq('event_id', eventId)
+              .order('created_at', { ascending: false })
+          );
+        }
+        if (shouldLoadNotes) {
+          promises.push(
+            supabase
+              .from(T_NOTES)
+              .select('*')
+              .eq('event_id', eventId)
+              .order('created_at', { ascending: false })
+          );
+        }
+        if (shouldLoadTeam) {
+          promises.push(
+            supabase
+              .from(T_TEAM)
+              .select('*')
+              .eq('event_id', eventId)
+              .order('name', { ascending: true })
+          );
+        }
+        if (shouldLoadTables) {
+          promises.push(
+            supabase
+              .from(T_TABLES)
+              .select('*')
+              .eq('event_id', eventId)
+              .order('created_at', { ascending: true })
+          );
+        }
+
+        const results = await Promise.all(promises);
+        if (cancelled) return;
+
+        let idx = 0;
+        if (shouldLoadDocuments) {
+          const res = results[idx++];
+          if (res.error) throw res.error;
+          setDocuments((res.data as DocumentRow[]) ?? []);
+        }
+        if (shouldLoadNotes) {
+          const res = results[idx++];
+          if (res.error) throw res.error;
+          setNotes((res.data as NoteRow[]) ?? []);
+        }
+        if (shouldLoadTeam) {
+          const res = results[idx++];
+          if (res.error) throw res.error;
+          setTeam((res.data as TeamMemberRow[]) ?? []);
+        }
+        if (shouldLoadTables) {
+          const res = results[idx++];
+          if (res.error) throw res.error;
+          setTables((res.data as TableRow[]) ?? []);
+        }
+
+        setLoadedTabData((prev) => ({
+          documents: prev.documents || shouldLoadDocuments,
+          notes: prev.notes || shouldLoadNotes,
+          team: prev.team || shouldLoadTeam,
+          tables: prev.tables || shouldLoadTables,
+        }));
+      } catch (err: any) {
+        if (cancelled) return;
+        setErrorMsg(err?.message ?? 'Erro ao carregar dados da aba.');
+      } finally {
+        if (!cancelled) setLoadingTabData(false);
+      }
+    }
+
+    void loadTabDataOnDemand();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, eventId, user, loadedTabData]);
 
   // --------------------
   // Upload foto
@@ -2742,6 +2824,13 @@ export function EventDetailsPage() {
             </p>
           </button>
         </div>
+
+        {loadingTabData && (
+          <div className="mb-4 inline-flex items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-medium text-indigo-700">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
+            Carregando dados do módulo...
+          </div>
+        )}
 
         {/* Conteúdo */}
         {activeTab === 'history' && (

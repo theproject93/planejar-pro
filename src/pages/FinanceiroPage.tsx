@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Area,
@@ -160,6 +160,16 @@ function getErrorMessage(error: unknown) {
   return 'erro desconhecido';
 }
 
+function isUniqueConstraintError(error: unknown, constraint: string) {
+  if (!error || typeof error !== 'object') return false;
+  const row = error as { code?: unknown; message?: unknown };
+  return (
+    row.code === '23505' &&
+    typeof row.message === 'string' &&
+    row.message.includes(constraint)
+  );
+}
+
 export function FinanceiroPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -203,6 +213,7 @@ export function FinanceiroPage() {
   const [cashInput, setCashInput] = useState('0');
   const [eventsCount, setEventsCount] = useState(0);
   const [isSyncingEvents, setIsSyncingEvents] = useState(false);
+  const syncAssessoriaLockRef = useRef(false);
 
   const SELF_VENDOR_CATEGORY = 'Assessoria/Cerimonialista';
 
@@ -402,189 +413,217 @@ export function FinanceiroPage() {
 
   async function syncAssessoriaEntries(eventIds: string[]) {
     if (!user || eventIds.length === 0) return;
+    if (syncAssessoriaLockRef.current) return;
+    syncAssessoriaLockRef.current = true;
 
-    const { data: eventsData, error: eventsError } = await supabase
-      .from('events')
-      .select('id, name, event_date, user_id')
-      .in('id', eventIds)
-      .eq('user_id', user.id);
-    if (eventsError) throw eventsError;
+    try {
+      const { data: eventsData, error: eventsError } = await supabase
+        .from('events')
+        .select('id, name, event_date, user_id')
+        .in('id', eventIds)
+        .eq('user_id', user.id);
+      if (eventsError) throw eventsError;
 
-    const eventsById = new Map<string, EventFinanceRef>();
-    (eventsData as EventFinanceRef[] | null)?.forEach((eventItem) => {
-      eventsById.set(eventItem.id, eventItem);
-    });
+      const eventsById = new Map<string, EventFinanceRef>();
+      (eventsData as EventFinanceRef[] | null)?.forEach((eventItem) => {
+        eventsById.set(eventItem.id, eventItem);
+      });
 
-    const { data: vendors, error: vendorsError } = await supabase
-      .from('event_vendors')
-      .select('id,event_id,category,name')
-      .in('event_id', eventIds);
-    if (vendorsError) throw vendorsError;
+      const { data: vendors, error: vendorsError } = await supabase
+        .from('event_vendors')
+        .select('id,event_id,category,name')
+        .in('event_id', eventIds);
+      if (vendorsError) throw vendorsError;
 
-    const selfVendors = ((vendors ?? []) as VendorFinanceRef[]).filter((vendor) =>
-      isSelfVendor(vendor)
-    );
-    const selfVendorIds = selfVendors.map((vendor) => vendor.id);
-
-    if (selfVendorIds.length === 0) return;
-
-    const { data: expensesData, error: expensesError } = await supabase
-      .from('event_expenses')
-      .select('id,event_id,name,value,vendor_id')
-      .in('vendor_id', selfVendorIds);
-    if (expensesError) throw expensesError;
-
-    const scopedExpenses = ((expensesData ?? []) as ExpenseFinanceRef[]).filter((expense) =>
-      eventsById.has(expense.event_id)
-    );
-
-    if (scopedExpenses.length === 0) return;
-
-    const existingPlannedRows = await supabase
-      .from('user_finance_entries')
-      .select('id, source_expense_id')
-      .eq('user_id', user.id)
-      .in('source_event_id', eventIds)
-      .is('source_payment_id', null)
-      .not('source_expense_id', 'is', null);
-    if (existingPlannedRows.error) throw existingPlannedRows.error;
-
-    const scopedExpenseIds = scopedExpenses.map((expense) => expense.id);
-    const stalePlannedEntryIds = (existingPlannedRows.data ?? [])
-      .filter((row) => !scopedExpenseIds.includes(row.source_expense_id as string))
-      .map((row) => row.id);
-    if (stalePlannedEntryIds.length > 0) {
-      const deleteStalePlanned = await supabase
-        .from('user_finance_entries')
-        .delete()
-        .eq('user_id', user.id)
-        .in('id', stalePlannedEntryIds);
-      if (deleteStalePlanned.error) throw deleteStalePlanned.error;
-    }
-
-    const expenseIds = scopedExpenseIds;
-    const { data: paymentsData, error: paymentsError } = await supabase
-      .from('expense_payments')
-      .select('id, event_id, expense_id, amount, method, paid_at, note')
-      .in('expense_id', expenseIds);
-    if (paymentsError) throw paymentsError;
-
-    const scopedPayments = ((paymentsData ?? []) as PaymentFinanceRef[]).filter((payment) =>
-      eventsById.has(payment.event_id)
-    );
-
-    const paidByExpenseId = new Map<string, number>();
-    scopedPayments.forEach((payment) => {
-      const amount = Number(payment.amount) || 0;
-      paidByExpenseId.set(
-        payment.expense_id,
-        (paidByExpenseId.get(payment.expense_id) ?? 0) + amount
+      const selfVendors = ((vendors ?? []) as VendorFinanceRef[]).filter((vendor) =>
+        isSelfVendor(vendor)
       );
-    });
+      const selfVendorIds = selfVendors.map((vendor) => vendor.id);
 
-    const plannedEntries = scopedExpenses
-      .map((expense) => {
-        const eventItem = eventsById.get(expense.event_id);
-        if (!eventItem) return null;
-        const total = Number(expense.value) || 0;
-        const paid = paidByExpenseId.get(expense.id) ?? 0;
-        const remaining = Math.max(total - paid, 0);
-        if (remaining <= 0) return null;
-        return {
-          user_id: user.id,
-          title: `A receber • ${eventItem.name ?? expense.name ?? 'Evento'}`,
-          client_name: eventItem.name ?? null,
-          amount: remaining,
-          status: 'previsto' as const,
-          expected_at: eventItem.event_date ?? null,
-          received_at: null,
-          payment_method: null,
-          notes: 'Valor em aberto da assessoria no evento.',
-          source_event_id: expense.event_id,
-          source_vendor_id: expense.vendor_id,
-          source_expense_id: expense.id,
-          source_payment_id: null,
-        };
-      })
-      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+      if (selfVendorIds.length === 0) return;
 
-    const clearPlanned = await supabase
-      .from('user_finance_entries')
-      .delete()
-      .eq('user_id', user.id)
-      .in('source_event_id', eventIds)
-      .is('source_payment_id', null)
-      .not('source_expense_id', 'is', null);
-    if (clearPlanned.error) throw clearPlanned.error;
+      const { data: expensesData, error: expensesError } = await supabase
+        .from('event_expenses')
+        .select('id,event_id,name,value,vendor_id')
+        .in('vendor_id', selfVendorIds);
+      if (expensesError) throw expensesError;
 
-    if (plannedEntries.length > 0) {
-      const plannedInsert = await supabase
+      const scopedExpenses = ((expensesData ?? []) as ExpenseFinanceRef[]).filter((expense) =>
+        eventsById.has(expense.event_id)
+      );
+
+      if (scopedExpenses.length === 0) return;
+
+      const existingPlannedRows = await supabase
         .from('user_finance_entries')
-        .insert(plannedEntries);
-      if (plannedInsert.error) throw plannedInsert.error;
-    }
+        .select('id, source_expense_id')
+        .eq('user_id', user.id)
+        .in('source_event_id', eventIds)
+        .is('source_payment_id', null)
+        .not('source_expense_id', 'is', null);
+      if (existingPlannedRows.error) throw existingPlannedRows.error;
 
-    const plannedSourceIds = plannedEntries.map((entry) => entry.source_expense_id);
-    const paidExpenseIds = scopedExpenses
-      .filter((expense) => (paidByExpenseId.get(expense.id) ?? 0) > 0)
-      .map((expense) => expense.id);
-    const fullyPaidSourceIds = paidExpenseIds.filter(
-      (expenseId) => !plannedSourceIds.includes(expenseId)
-    );
-    if (fullyPaidSourceIds.length > 0) {
-      const deletePlanned = await supabase
+      const scopedExpenseIds = scopedExpenses.map((expense) => expense.id);
+      const stalePlannedEntryIds = (existingPlannedRows.data ?? [])
+        .filter((row) => !scopedExpenseIds.includes(row.source_expense_id as string))
+        .map((row) => row.id);
+      if (stalePlannedEntryIds.length > 0) {
+        const deleteStalePlanned = await supabase
+          .from('user_finance_entries')
+          .delete()
+          .eq('user_id', user.id)
+          .in('id', stalePlannedEntryIds);
+        if (deleteStalePlanned.error) throw deleteStalePlanned.error;
+      }
+
+      const { data: paymentsData, error: paymentsError } = await supabase
+        .from('expense_payments')
+        .select('id, event_id, expense_id, amount, method, paid_at, note')
+        .in('expense_id', scopedExpenseIds);
+      if (paymentsError) throw paymentsError;
+
+      const scopedPayments = ((paymentsData ?? []) as PaymentFinanceRef[]).filter((payment) =>
+        eventsById.has(payment.event_id)
+      );
+
+      const paidByExpenseId = new Map<string, number>();
+      scopedPayments.forEach((payment) => {
+        const amount = Number(payment.amount) || 0;
+        paidByExpenseId.set(
+          payment.expense_id,
+          (paidByExpenseId.get(payment.expense_id) ?? 0) + amount
+        );
+      });
+
+      const plannedEntries = scopedExpenses
+        .map((expense) => {
+          const eventItem = eventsById.get(expense.event_id);
+          if (!eventItem) return null;
+          const total = Number(expense.value) || 0;
+          const paid = paidByExpenseId.get(expense.id) ?? 0;
+          const remaining = Math.max(total - paid, 0);
+          if (remaining <= 0) return null;
+          return {
+            user_id: user.id,
+            title: `A receber â€¢ ${eventItem.name ?? expense.name ?? 'Evento'}`,
+            client_name: eventItem.name ?? null,
+            amount: remaining,
+            status: 'previsto' as const,
+            expected_at: eventItem.event_date ?? null,
+            received_at: null,
+            payment_method: null,
+            notes: 'Valor em aberto da assessoria no evento.',
+            source_event_id: expense.event_id,
+            source_vendor_id: expense.vendor_id,
+            source_expense_id: expense.id,
+            source_payment_id: null,
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+      const plannedEntriesDeduped = Array.from(
+        new Map(plannedEntries.map((entry) => [entry.source_expense_id, entry])).values()
+      );
+
+      const clearPlanned = await supabase
         .from('user_finance_entries')
         .delete()
         .eq('user_id', user.id)
-        .in('source_expense_id', fullyPaidSourceIds)
-        .is('source_payment_id', null);
-      if (deletePlanned.error) throw deletePlanned.error;
-    }
+        .in('source_event_id', eventIds)
+        .is('source_payment_id', null)
+        .not('source_expense_id', 'is', null);
+      if (clearPlanned.error) throw clearPlanned.error;
 
-    const paymentEntries = scopedPayments
-      .map((payment) => {
-        const relatedExpense = scopedExpenses.find(
-          (expense) => expense.id === payment.expense_id
-        );
-        if (!relatedExpense) return null;
-        const eventItem = eventsById.get(payment.event_id);
-        if (!eventItem) return null;
-        const amount = Number(payment.amount) || 0;
-        if (amount <= 0) return null;
-        return {
-          user_id: user.id,
-          title: `Recebimento • ${eventItem.name ?? relatedExpense.name ?? 'Evento'}`,
-          client_name: eventItem.name ?? null,
-          amount,
-          status: 'pago' as const,
-          expected_at: null,
-          received_at: payment.paid_at ?? null,
-          payment_method: payment.method ?? null,
-          notes: payment.note ?? 'Pagamento da assessoria no evento.',
-          source_event_id: payment.event_id,
-          source_vendor_id: relatedExpense.vendor_id,
-          source_expense_id: payment.expense_id,
-          source_payment_id: payment.id,
-        };
-      })
-      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+      if (plannedEntriesDeduped.length > 0) {
+        const plannedInsert = await supabase
+          .from('user_finance_entries')
+          .insert(plannedEntriesDeduped);
+        if (
+          plannedInsert.error &&
+          !isUniqueConstraintError(
+            plannedInsert.error,
+            'user_finance_entries_source_expense_planned_key'
+          )
+        ) {
+          throw plannedInsert.error;
+        }
+      }
 
-    const clearPayments = await supabase
-      .from('user_finance_entries')
-      .delete()
-      .eq('user_id', user.id)
-      .in('source_event_id', eventIds)
-      .not('source_payment_id', 'is', null);
-    if (clearPayments.error) throw clearPayments.error;
+      const plannedSourceIds = plannedEntriesDeduped.map((entry) => entry.source_expense_id);
+      const paidExpenseIds = scopedExpenses
+        .filter((expense) => (paidByExpenseId.get(expense.id) ?? 0) > 0)
+        .map((expense) => expense.id);
+      const fullyPaidSourceIds = paidExpenseIds.filter(
+        (expenseId) => !plannedSourceIds.includes(expenseId)
+      );
+      if (fullyPaidSourceIds.length > 0) {
+        const deletePlanned = await supabase
+          .from('user_finance_entries')
+          .delete()
+          .eq('user_id', user.id)
+          .in('source_expense_id', fullyPaidSourceIds)
+          .is('source_payment_id', null);
+        if (deletePlanned.error) throw deletePlanned.error;
+      }
 
-    if (paymentEntries.length > 0) {
-      const paymentInsert = await supabase
+      const paymentEntries = scopedPayments
+        .map((payment) => {
+          const relatedExpense = scopedExpenses.find(
+            (expense) => expense.id === payment.expense_id
+          );
+          if (!relatedExpense) return null;
+          const eventItem = eventsById.get(payment.event_id);
+          if (!eventItem) return null;
+          const amount = Number(payment.amount) || 0;
+          if (amount <= 0) return null;
+          return {
+            user_id: user.id,
+            title: `Recebimento â€¢ ${eventItem.name ?? relatedExpense.name ?? 'Evento'}`,
+            client_name: eventItem.name ?? null,
+            amount,
+            status: 'pago' as const,
+            expected_at: null,
+            received_at: payment.paid_at ?? null,
+            payment_method: payment.method ?? null,
+            notes: payment.note ?? 'Pagamento da assessoria no evento.',
+            source_event_id: payment.event_id,
+            source_vendor_id: relatedExpense.vendor_id,
+            source_expense_id: payment.expense_id,
+            source_payment_id: payment.id,
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+      const paymentEntriesDeduped = Array.from(
+        new Map(paymentEntries.map((entry) => [entry.source_payment_id, entry])).values()
+      );
+
+      const clearPayments = await supabase
         .from('user_finance_entries')
-        .insert(paymentEntries);
-      if (paymentInsert.error) throw paymentInsert.error;
+        .delete()
+        .eq('user_id', user.id)
+        .in('source_event_id', eventIds)
+        .not('source_payment_id', 'is', null);
+      if (clearPayments.error) throw clearPayments.error;
+
+      if (paymentEntriesDeduped.length > 0) {
+        const paymentInsert = await supabase
+          .from('user_finance_entries')
+          .insert(paymentEntriesDeduped);
+        if (
+          paymentInsert.error &&
+          !isUniqueConstraintError(
+            paymentInsert.error,
+            'user_finance_entries_source_payment_id_key'
+          )
+        ) {
+          throw paymentInsert.error;
+        }
+      }
+    } finally {
+      syncAssessoriaLockRef.current = false;
     }
   }
-
   async function uploadProof(file: File, kind: 'entries' | 'expenses') {
     if (!user) return null;
     const path = `${user.id}/${kind}/${Date.now()}-${file.name}`;
@@ -986,7 +1025,7 @@ export function FinanceiroPage() {
                 Que bom ter voce aqui
               </h2>
               <p className="text-sm text-gray-500 mt-1">
-                Vamos calibrar seu financeiro para comeÃ§ar certo.
+                Vamos calibrar seu financeiro para começar certo.
               </p>
             </div>
             <div className="p-8 space-y-6">
@@ -1478,7 +1517,7 @@ export function FinanceiroPage() {
                     <div>
                       <p className="font-semibold text-gray-900">{tx.title}</p>
                       <p className="text-xs text-gray-500">
-                        {formatShortDate(tx.date)} â€¢ {tx.id.slice(0, 8)}
+                        {formatShortDate(tx.date)} • {tx.id.slice(0, 8)}
                       </p>
                     </div>
                   </div>
@@ -1599,5 +1638,6 @@ export function FinanceiroPage() {
     </div>
   );
 }
+
 
 

@@ -66,6 +66,30 @@ type HintStateRow = {
   last_opened_at: string | null;
   last_dismissed_at: string | null;
 };
+type FinanceEntryLite = {
+  amount: number | string | null;
+  status: string | null;
+};
+
+type FinanceExpenseLite = {
+  amount: number | string | null;
+  status: string | null;
+};
+
+type EventLiteData = {
+  id: string;
+  name: string;
+  event_date: string | null;
+  budget_total: number | string | null;
+};
+
+type EventExpenseLite = {
+  value: number | string | null;
+};
+
+type EventPaymentLite = {
+  amount: number | string | null;
+};
 
 const HINT_COOLDOWN_MS = 1000 * 60 * 45;
 const OPENED_COOLDOWN_MS = 1000 * 60 * 60 * 2;
@@ -84,6 +108,30 @@ function normalizeText(value: string) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+type AssistantTopic = 'finance' | 'vendors' | 'generic';
+
+function classifyAssistantTopic(question: string): AssistantTopic {
+  const q = normalizeText(question);
+  if (
+    q.includes('financeir') ||
+    q.includes('caixa') ||
+    q.includes('saldo') ||
+    q.includes('fluxo') ||
+    q.includes('pagament')
+  ) {
+    return 'finance';
+  }
+  if (
+    q.includes('fornecedor') ||
+    q.includes('buffet') ||
+    q.includes('contrato') ||
+    q.includes('prestador')
+  ) {
+    return 'vendors';
+  }
+  return 'generic';
+}
+
 function getPendingRsvp(guest: GuestLite) {
   const status = (guest.rsvp_status ?? '').trim().toLowerCase();
   if (status === 'pending') return true;
@@ -100,103 +148,285 @@ function getDaysUntil(dateText: string | null) {
   return Math.floor((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function answerFallback(input: string, hints: PlanHint[]): Omit<ChatMessage, 'id' | 'role'> {
-  const text = normalizeText(input);
-  if (
-    text.includes('alerta') ||
-    text.includes('pendenc') ||
-    text.includes('dica') ||
-    text.includes('prioridade')
-  ) {
-    if (hints.length === 0) {
-      return {
-        text:
-          'No momento não encontrei alertas críticos.\n\n' +
-          'Se você quiser, te ajudo em modo passo a passo:\n' +
-          '1. Você me diz o módulo (Eventos, Convidados, Cronograma ou Financeiro).\n' +
-          '2. Eu te explico exatamente onde clicar.\n' +
-          '3. No final, te digo como validar se ficou certo.',
-      };
-    }
+function toNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toBRL(value: number) {
+  return value.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  });
+}
+
+function isConfirmedEntryStatus(status: string | null | undefined) {
+  const normalized = normalizeText(status ?? '');
+  return normalized === 'confirmado' || normalized === 'pago' || normalized === 'parcelado';
+}
+
+function isPlannedStatus(status: string | null | undefined) {
+  const normalized = normalizeText(status ?? '');
+  return normalized === 'pendente' || normalized === 'previsto' || normalized === 'parcelado';
+}
+
+function isConfirmedExpenseStatus(status: string | null | undefined) {
+  const normalized = normalizeText(status ?? '');
+  return normalized === 'confirmado' || normalized === 'pago' || normalized === 'parcelado';
+}
+
+async function buildContextAwareFallback(params: {
+  question: string;
+  userId: string | null;
+  userName: string;
+  currentEventId: string | null;
+  hints: PlanHint[];
+}): Promise<Omit<ChatMessage, 'id' | 'role'>> {
+  const { question, userId, userName, currentEventId, hints } = params;
+  const normalizedQuestion = normalizeText(question);
+  const topic = classifyAssistantTopic(question);
+  const isSmallTalk =
+    normalizedQuestion.includes('obrigad') ||
+    normalizedQuestion.includes('valeu') ||
+    normalizedQuestion.includes('entendi') ||
+    normalizedQuestion === 'ok' ||
+    normalizedQuestion === 'blz';
+
+  if (isSmallTalk) {
     return {
-      text:
-        `Encontrei ${hints.length} alerta(s) priorizados.\n\n` +
-        `Prioridade agora: ${hints[0].title}.\n` +
-        'Posso te guiar em sequência prática:\n' +
-        '1. Abrir a tela correta.\n' +
-        '2. Ajustar os campos essenciais.\n' +
-        '3. Confirmar no final se o alerta sumiu.',
-      ctaLabel: hints[0].ctaLabel,
-      ctaPath: hints[0].ctaPath,
+      text: `De nada, ${userName || 'assessora'}! Quando quiser, te ajudo no próximo passo da operação.`,
     };
   }
 
-  if (text.includes('fornecedor') || text.includes('buffet')) {
+  if (!userId) {
     return {
       text:
-        'Perfeito, vamos configurar fornecedores de forma correta.\n\n' +
-        '1. Acesse o evento e abra a aba "Fornecedores".\n' +
-        '2. Verifique se cada fornecedor tem categoria definida (ex.: Buffet, Foto, DJ).\n' +
-        '3. Preencha horários de chegada e finalização para cada fornecedor.\n' +
-        '4. Atualize o status (pendente, a caminho, chegou, finalizado) quando necessário.\n' +
-        '5. Valide na Torre de Comando se os dados apareceram corretamente.',
-      ctaLabel: 'Abrir eventos',
-      ctaPath: '/dashboard/eventos',
+        `Olá ${userName || 'assessora'}, tudo bem?\n\n` +
+        'Resumo do cenário\n' +
+        '- Não consegui validar sua sessão para ler seus dados agora.\n\n' +
+        'Passo a passo recomendado\n' +
+        '1. Atualize a página e faça login novamente.\n' +
+        '2. Abra o módulo que você quer analisar.\n' +
+        '3. Me envie a pergunta novamente.\n' +
+        '4. Se continuar, me avise a rota atual para eu te orientar melhor.\n\n' +
+        'Como validar se ficou certo\n' +
+        '- Sua pergunta deve retornar com números reais da sua base.\n\n' +
+        'Se der erro\n' +
+        '- Recarregue com Ctrl+F5 e tente novamente.',
+      ctaLabel: 'Abrir dashboard',
+      ctaPath: '/dashboard',
     };
   }
 
-  if (text.includes('convidad') || text.includes('rsvp')) {
+  if (topic === 'vendors') {
     return {
       text:
-        'Ótima pergunta. Vamos ajustar RSVP com segurança.\n\n' +
-        '1. Abra o evento e entre na aba "Convidados".\n' +
-        '2. Verifique a lista de pendentes e confirme se os telefones estão válidos.\n' +
-        '3. Faça disparo em massa para os pendentes.\n' +
-        '4. Acompanhe os retornos por status: pendente, confirmado ou recusado.\n' +
-        '5. Valide no total de confirmações se o número subiu após o disparo.',
-      ctaLabel: 'Abrir eventos',
-      ctaPath: '/dashboard/eventos',
+        `Olá ${userName || 'assessora'}, tudo bem?\n\n` +
+        'Resumo do cenário\n' +
+        '- Para fornecedor sem assinatura, o risco é seguir sem garantia de escopo, prazo e cancelamento.\n\n' +
+        'Passo a passo recomendado\n' +
+        '1. Identifique a objeção principal (multa, pagamento, prazo ou cláusula).\n' +
+        '2. Proponha um contrato simplificado com entregáveis, horários, valor e política de cancelamento.\n' +
+        '3. Formalize por assinatura eletrônica ou aceite por escrito (e-mail/WhatsApp).\n' +
+        '4. Defina fornecedor reserva e prazo limite para decisão.\n\n' +
+        'Como validar se ficou certo\n' +
+        '- Escopo, valor e datas ficaram formalizados por escrito.\n' +
+        '- O documento foi anexado no evento para consulta da equipe.\n\n' +
+        'Se der erro\n' +
+        '- Se o fornecedor mantiver recusa, não confirme reserva sem sinal e sem aceite formal.',
     };
   }
 
-  if (text.includes('cronograma') || text.includes('timeline') || text.includes('atras')) {
+  if (topic === 'generic') {
     return {
       text:
-        'Perfeito, vamos organizar o cronograma com mais controle.\n\n' +
-        '1. Abra o evento e acesse a aba "Cronograma".\n' +
-        '2. Clique em "Gerar sugestões IA" para receber recomendações.\n' +
-        '3. Aplique as sugestões que fizerem sentido para o seu evento.\n' +
-        '4. Resolva primeiro tarefas vencidas e depois as de curto prazo.\n' +
-        '5. Valide se a linha do tempo ficou sem lacunas de horários.',
-      ctaLabel: 'Abrir eventos',
-      ctaPath: '/dashboard/eventos',
+        `Olá ${userName || 'assessora'}, tudo bem?\n\n` +
+        'Consigo te orientar melhor se você me disser o módulo e o objetivo agora.\n' +
+        'Exemplos: "fornecedores", "cronograma", "convidados", "documentos" ou "financeiro".',
     };
   }
 
-  if (text.includes('financeiro') || text.includes('caixa') || text.includes('receber')) {
-    return {
-      text:
-        'Claro, vamos revisar o financeiro sem erro.\n\n' +
-        '1. Abra "Financeiro" no menu lateral.\n' +
-        '2. Confira os cards: saldo em caixa, entradas confirmadas e programadas.\n' +
-        '3. Em cada movimentação, valide valor, data, status e comprovante.\n' +
-        '4. Para divergências, edite o lançamento e salve novamente.\n' +
-        '5. Valide se os gráficos e cards atualizaram após o salvamento.',
-      ctaLabel: 'Abrir financeiro',
-      ctaPath: '/dashboard/financeiro',
-    };
+  const [balanceRes, entriesRes, expensesRes, eventRes, eventExpensesRes, eventPaymentsRes] =
+    await Promise.all([
+      supabase
+        .from('user_finance_balance')
+        .select('base_balance')
+        .eq('user_id', userId)
+        .maybeSingle(),
+      supabase
+        .from('user_finance_entries')
+        .select('amount,status')
+        .eq('user_id', userId)
+        .limit(2000),
+      supabase
+        .from('user_finance_expenses')
+        .select('amount,status')
+        .eq('user_id', userId)
+        .limit(2000),
+      currentEventId
+        ? supabase
+            .from('events')
+            .select('id,name,event_date,budget_total')
+            .eq('id', currentEventId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null } as any),
+      currentEventId
+        ? supabase
+            .from('event_expenses')
+            .select('value')
+            .eq('event_id', currentEventId)
+            .limit(2000)
+        : Promise.resolve({ data: [], error: null } as any),
+      currentEventId
+        ? supabase
+            .from('expense_payments')
+            .select('amount')
+            .eq('event_id', currentEventId)
+            .limit(2000)
+        : Promise.resolve({ data: [], error: null } as any),
+    ]);
+
+  const entries = (entriesRes.data ?? []) as FinanceEntryLite[];
+  const expenses = (expensesRes.data ?? []) as FinanceExpenseLite[];
+  const baseBalance = toNumber((balanceRes.data as { base_balance?: unknown } | null)?.base_balance);
+  const confirmedIn = entries
+    .filter((entry) => isConfirmedEntryStatus(entry.status))
+    .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
+  const plannedIn = entries
+    .filter((entry) => isPlannedStatus(entry.status))
+    .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
+  const confirmedOut = expenses
+    .filter((expense) => isConfirmedExpenseStatus(expense.status))
+    .reduce((sum, expense) => sum + toNumber(expense.amount), 0);
+  const plannedOut = expenses
+    .filter((expense) => isPlannedStatus(expense.status))
+    .reduce((sum, expense) => sum + toNumber(expense.amount), 0);
+  const cashBalance = baseBalance + confirmedIn - confirmedOut;
+
+  const eventData = (eventRes.data as EventLiteData | null) ?? null;
+  const eventSpent = ((eventExpensesRes.data ?? []) as EventExpenseLite[]).reduce(
+    (sum, row) => sum + toNumber(row.value),
+    0
+  );
+  const eventPaid = ((eventPaymentsRes.data ?? []) as EventPaymentLite[]).reduce(
+    (sum, row) => sum + toNumber(row.amount),
+    0
+  );
+  const eventOpen = Math.max(eventSpent - eventPaid, 0);
+
+  const asksCash =
+    normalizedQuestion.includes('saldo') ||
+    normalizedQuestion.includes('caixa') ||
+    normalizedQuestion.includes('fluxo');
+
+  const lines: string[] = [];
+  lines.push(`Olá ${userName || 'assessora'}, tudo bem?`);
+  lines.push('');
+  lines.push('Resumo do cenário');
+  lines.push(`- Seu saldo em caixa atual está em ${toBRL(cashBalance)}.`);
+  lines.push(`- Entradas confirmadas: ${toBRL(confirmedIn)}. Entradas programadas: ${toBRL(plannedIn)}.`);
+  lines.push(`- Saídas confirmadas: ${toBRL(confirmedOut)}. Saídas programadas: ${toBRL(plannedOut)}.`);
+  if (eventData) {
+    lines.push(
+      `- No evento "${eventData.name}", o total lançado é ${toBRL(eventSpent)}, já pago ${toBRL(eventPaid)} e em aberto ${toBRL(eventOpen)}.`
+    );
   }
+
+  lines.push('');
+  lines.push('Passo a passo recomendado');
+  lines.push('1. Abra o Financeiro Geral e confirme se os cards estão com os mesmos valores acima.');
+  lines.push('2. Valide se as últimas movimentações mostram os lançamentos mais recentes.');
+  if (eventData) {
+    lines.push(`3. Abra o evento "${eventData.name}" na aba Financeiro e confira pagamentos/abertos para garantir sincronização.`);
+  } else {
+    lines.push('3. Abra o evento principal e revise a aba Financeiro para validar pagamentos em aberto.');
+  }
+  lines.push('4. Se houver divergência, edite o lançamento na origem (evento ou financeiro geral) e salve novamente.');
+
+  lines.push('');
+  lines.push('Como validar se ficou certo');
+  if (asksCash) {
+    lines.push(`- O saldo em caixa precisa permanecer em ${toBRL(cashBalance)} até que um novo lançamento seja salvo.`);
+  } else {
+    lines.push('- O card consultado deve bater com os valores dos lançamentos de origem.');
+  }
+  lines.push('- Após salvar, o card, gráfico e lista de movimentações devem atualizar juntos.');
+
+  lines.push('');
+  lines.push('Se der erro');
+  lines.push('- Atualize a página e tente novamente uma vez.');
+  lines.push('- Se persistir, me diga qual tela e ação você executou para eu te orientar no ajuste exato.');
+
+  const action = hints[0] ?? {
+    id: 'finance',
+    severity: 'medium',
+    title: 'Abrir financeiro',
+    message: '',
+    ctaLabel: 'Abrir financeiro',
+    ctaPath: '/dashboard/financeiro',
+  };
 
   return {
-    text:
-      'Posso te ajudar com eventos, fornecedores, convidados, cronograma, financeiro e Torre de Comando.\n\n' +
-      'Me diga em qual etapa você está agora que eu te explico em detalhes:\n' +
-      '1. Onde clicar.\n' +
-      '2. O que preencher.\n' +
-      '3. Como confirmar se ficou certo.',
-    ctaLabel: 'Abrir dashboard',
-    ctaPath: '/dashboard',
+    text: lines.join('\n'),
+    ctaLabel: asksCash ? 'Abrir financeiro' : action.ctaLabel,
+    ctaPath: asksCash ? '/dashboard/financeiro' : action.ctaPath,
   };
+}
+
+function buildHintMessage(hint: PlanHint, userName: string) {
+  const normalizedTitle = normalizeText(hint.title);
+  const greeting = `Olá ${userName || 'assessora'}, por gentileza verifique esta pendência:`;
+
+  if (normalizedTitle.includes('buffet')) {
+    return (
+      `${greeting}\n\n` +
+      `- ${hint.title}.\n` +
+      '- Não encontrei fornecedor com categoria "Buffet" nesse evento.\n' +
+      '- Isso pode gerar atraso na operação e no checklist final.\n\n' +
+      'Como resolver agora:\n' +
+      '1. Abra o evento indicado.\n' +
+      '2. Vá para a aba Fornecedores.\n' +
+      '3. Cadastre ou ajuste um fornecedor na categoria Buffet.\n' +
+      '4. Se já existir, valide nome, contato e status.'
+    );
+  }
+
+  if (normalizedTitle.includes('convidado')) {
+    return (
+      `${greeting}\n\n` +
+      `- ${hint.title}.\n` +
+      '- Ainda existem confirmações de presença pendentes para esse evento.\n\n' +
+      'Como resolver agora:\n' +
+      '1. Abra o evento indicado.\n' +
+      '2. Vá para a aba Convidados.\n' +
+      '3. Filtre pendentes e revise contatos.\n' +
+      '4. Envie ou reenvie o convite para destravar as confirmações.'
+    );
+  }
+
+  if (normalizedTitle.includes('tarefa') || normalizedTitle.includes('atras')) {
+    return (
+      `${greeting}\n\n` +
+      `- ${hint.title}.\n` +
+      '- Há tarefas vencidas e isso pode impactar o cronograma do evento.\n\n' +
+      'Como resolver agora:\n' +
+      '1. Abra o evento indicado.\n' +
+      '2. Vá para Cronograma ou Checklist.\n' +
+      '3. Conclua primeiro as tarefas vencidas.\n' +
+      '4. Reordene prioridades para as próximas 24 horas.'
+    );
+  }
+
+  return (
+    `${greeting}\n\n` +
+    `- ${hint.title}.\n` +
+    `- ${hint.message}\n\n` +
+    'Como resolver agora:\n' +
+    '1. Abra o evento indicado.\n' +
+    '2. Revise a aba relacionada à pendência.\n' +
+    '3. Aplique o ajuste necessário.\n' +
+    '4. Volte aqui e me diga se a pendência foi resolvida.'
+  );
 }
 
 function shouldTemporarilyHideHint(state: HintStateRow | undefined, nowMs: number) {
@@ -372,6 +602,7 @@ export function PlanAssistantWidget() {
           .from('events')
           .select('id, name, event_date')
           .eq('user_id', userId)
+          .or('status.is.null,status.neq.deleted')
           .order('event_date', { ascending: true })
           .limit(8);
 
@@ -524,6 +755,14 @@ export function PlanAssistantWidget() {
           );
           setHints(visibleHints);
           setHintStateMap(nextMap);
+          setProactiveHint((previous) => {
+            if (!previous) return previous;
+            const stillVisible = visibleHints.some((hint) => hint.id === previous.id);
+            return stillVisible ? previous : null;
+          });
+          setShowProactiveBubble((previous) =>
+            previous && visibleHints.length > 0
+          );
         }
       } catch {
         if (isMounted) {
@@ -600,8 +839,15 @@ export function PlanAssistantWidget() {
         ctaLabel: actions[0]?.label,
         ctaPath: actions[0]?.path,
       });
-    } catch {
-      const fallback = answerFallback(text, hints);
+    } catch (error) {
+      console.error('plan-assistant-chat invoke failed', error);
+      const fallback = await buildContextAwareFallback({
+        question: text,
+        userId,
+        userName: user?.email?.split('@')[0] ?? 'assessora',
+        currentEventId,
+        hints,
+      });
       pushBotMessage(fallback);
     } finally {
       setIsReplying(false);
@@ -616,7 +862,7 @@ export function PlanAssistantWidget() {
     setHints((prev) => prev.filter((item) => item.id !== hint.id));
     setProactiveHint((prev) => (prev?.id === hint.id ? null : prev));
     pushBotMessage({
-      text: `${hint.title}: ${hint.message}`,
+      text: buildHintMessage(hint, user?.email?.split('@')[0] ?? 'assessora'),
       ctaLabel: hint.ctaLabel,
       ctaPath: hint.ctaPath,
     });
@@ -624,6 +870,8 @@ export function PlanAssistantWidget() {
 
   function handlePanelPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (!panelRef.current) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('[data-plan-no-drag="true"]')) return;
     const rect = panelRef.current.getBoundingClientRect();
     dragRef.current = {
       pointerId: event.pointerId,
@@ -698,9 +946,16 @@ export function PlanAssistantWidget() {
           }
           className="fixed w-[340px] md:w-[380px] h-[520px] max-h-[75vh] rounded-3xl border border-gray-200 bg-white shadow-2xl overflow-hidden flex flex-col"
         >
-          <div className="px-4 py-3 bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white flex items-center justify-between">
+          <div
+            onPointerDown={handlePanelPointerDown}
+            onPointerMove={handlePanelPointerMove}
+            onPointerUp={handlePanelPointerUp}
+            onPointerCancel={handlePanelPointerUp}
+            className={`px-4 py-3 bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white flex items-center justify-between select-none touch-none ${isDraggingPanel ? 'cursor-grabbing' : 'cursor-grab'}`}
+            title="Arraste para mover"
+          >
             <div className="flex items-center gap-2">
-                <img
+              <img
                 src="/images/plan-face-real.png"
                 alt="Plan IA"
                 className="h-8 w-8 rounded-full border border-white/30 object-cover"
@@ -710,17 +965,8 @@ export function PlanAssistantWidget() {
                 <p className="text-[11px] text-white/80">Assistente da plataforma</p>
               </div>
             </div>
-            <div
-              onPointerDown={handlePanelPointerDown}
-              onPointerMove={handlePanelPointerMove}
-              onPointerUp={handlePanelPointerUp}
-              onPointerCancel={handlePanelPointerUp}
-              className={`mr-3 flex items-center text-[10px] px-2 py-1 rounded-full bg-white/15 ${isDraggingPanel ? 'cursor-grabbing' : 'cursor-grab'} select-none touch-none`}
-              title="Arraste para mover"
-            >
-              Arrastar
-            </div>
             <button
+              data-plan-no-drag="true"
               onClick={() => setIsOpen(false)}
               className="text-white/80 hover:text-white"
               aria-label="Fechar chat"
@@ -847,3 +1093,6 @@ export function PlanAssistantWidget() {
     </div>
   );
 }
+
+
+

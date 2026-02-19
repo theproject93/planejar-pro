@@ -96,12 +96,12 @@ async function runCloudflareAi(payload: TimelinePayload): Promise<Suggestion[]> 
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`;
 
   const systemPrompt =
-    'Voce e um assistente de cronograma para eventos. Retorne apenas JSON valido com uma lista "suggestions". Cada item precisa ter: title, reason, activity, time (HH:mm), assignee, priority (high|medium|low). Limite de 5 itens e sem texto extra.';
+    'Voce e um assistente de cronograma do DIA do evento. Sugira apenas atividades operacionais do proprio dia (montagem, check-in de fornecedores, cerimonia, recepcao, transicoes e encerramento). Nao sugira planejamento de semanas anteriores, reunioes pre-evento ou tarefas administrativas gerais. Retorne apenas JSON valido com uma lista "suggestions". Cada item precisa ter: title, reason, activity, time (HH:mm), assignee, priority (high|medium|low). Limite de 5 itens e sem texto extra.';
 
   const userPrompt = JSON.stringify(
     {
       instruction:
-        'Analise o contexto e proponha proximas atividades praticas para o cronograma.',
+        'Analise o contexto e proponha proximas atividades praticas para o cronograma do dia do evento.',
       context: payload,
     },
     null,

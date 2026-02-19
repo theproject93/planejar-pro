@@ -1,4 +1,4 @@
-import { createClient } from 'npm:@supabase/supabase-js@2';
+﻿import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -90,6 +90,13 @@ function normalizeName(value: unknown) {
   return raw.replace(/[^a-zA-ZÀ-ÿ0-9 _-]/g, '').slice(0, 40) || 'assessora';
 }
 
+function normalizeText(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 function normalizeHints(value: unknown): SuggestedAction[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -104,17 +111,22 @@ function normalizeHints(value: unknown): SuggestedAction[] {
     .filter((item): item is SuggestedAction => item !== null);
 }
 
-function normalizeText(value: string) {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
-
 function extractEventId(path: string, explicitEventId: string) {
   if (explicitEventId) return explicitEventId;
   const match = path.match(/\/dashboard\/eventos\/([0-9a-fA-F-]{8,})/);
   return match?.[1] ?? '';
+}
+
+function uniqActions(items: SuggestedAction[]) {
+  const seen = new Set<string>();
+  const output: SuggestedAction[] = [];
+  for (const item of items) {
+    const key = `${item.label}::${item.path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(item);
+  }
+  return output.slice(0, 3);
 }
 
 function guestIsPending(row: { confirmed?: unknown; rsvp_status?: unknown }) {
@@ -135,16 +147,113 @@ function dateIsPast(value: unknown) {
   return date.getTime() < today.getTime();
 }
 
-function uniqActions(items: SuggestedAction[]) {
-  const seen = new Set<string>();
-  const output: SuggestedAction[] = [];
-  for (const item of items) {
-    const key = `${item.label}::${item.path}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    output.push(item);
+function formatMoney(value: number) {
+  return value.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 2,
+  });
+}
+
+function isSmallTalk(question: string) {
+  const q = normalizeText(question);
+  return (
+    q.includes('obrigad') ||
+    q.includes('valeu') ||
+    q.includes('show') ||
+    q === 'ok' ||
+    q === 'blz' ||
+    q.includes('entendi') ||
+    q.includes('ola') ||
+    q.includes('olá')
+  );
+}
+
+type QuestionTopic =
+  | 'smalltalk'
+  | 'finance'
+  | 'vendors'
+  | 'guests'
+  | 'timeline'
+  | 'documents'
+  | 'generic';
+
+function classifyQuestionTopic(question: string): QuestionTopic {
+  if (isSmallTalk(question)) return 'smalltalk';
+  const q = normalizeText(question);
+
+  if (
+    q.includes('financeir') ||
+    q.includes('caixa') ||
+    q.includes('pagament') ||
+    q.includes('receber') ||
+    q.includes('saldo') ||
+    q.includes('fluxo')
+  ) {
+    return 'finance';
   }
-  return output.slice(0, 3);
+
+  if (
+    q.includes('fornecedor') ||
+    q.includes('buffet') ||
+    q.includes('contrato') ||
+    q.includes('prestador')
+  ) {
+    return 'vendors';
+  }
+
+  if (q.includes('convidad') || q.includes('rsvp') || q.includes('confirmacao')) {
+    return 'guests';
+  }
+
+  if (
+    q.includes('cronograma') ||
+    q.includes('tarefa') ||
+    q.includes('checklist') ||
+    q.includes('atras')
+  ) {
+    return 'timeline';
+  }
+
+  if (
+    q.includes('documento') ||
+    q.includes('comprovante') ||
+    q.includes('arquivo') ||
+    q.includes('anexo')
+  ) {
+    return 'documents';
+  }
+
+  return 'generic';
+}
+
+function shouldForceStructuredSections(question: string) {
+  const q = normalizeText(question);
+  return (
+    q.includes('financeir') ||
+    q.includes('caixa') ||
+    q.includes('saldo') ||
+    q.includes('conciliar') ||
+    q.includes('card') ||
+    q.includes('grafico') ||
+    q.includes('erro') ||
+    q.includes('validar')
+  );
+}
+
+function asksNavigationIntent(question: string) {
+  const q = normalizeText(question);
+  return (
+    q.includes('abrir') ||
+    q.includes('abra ') ||
+    q.includes('ir para') ||
+    q.includes('onde fica') ||
+    q.includes('qual tela') ||
+    q.includes('como acessar') ||
+    q.includes('acessar') ||
+    q.includes('navegar') ||
+    q.includes('me leva')
+  );
 }
 
 async function getEventSnapshot(
@@ -163,29 +272,28 @@ async function getEventSnapshot(
 
   if (eventRes.error || !eventRes.data) return null;
 
-  const [vendorsRes, guestsRes, tasksRes, expensesRes, paymentsRes] =
-    await Promise.all([
-      supabase
-        .from('event_vendors')
-        .select('id, category, expected_arrival_time, expected_done_time')
-        .eq('event_id', eventId),
-      supabase
-        .from('event_guests')
-        .select('id, confirmed, rsvp_status')
-        .eq('event_id', eventId),
-      supabase
-        .from('event_tasks')
-        .select('id, completed, due_date')
-        .eq('event_id', eventId),
-      supabase
-        .from('event_expenses')
-        .select('id, name, value, status')
-        .eq('event_id', eventId),
-      supabase
-        .from('expense_payments')
-        .select('id, expense_id, amount')
-        .eq('event_id', eventId),
-    ]);
+  const [vendorsRes, guestsRes, tasksRes, expensesRes, paymentsRes] = await Promise.all([
+    supabase
+      .from('event_vendors')
+      .select('id, category, expected_arrival_time, expected_done_time')
+      .eq('event_id', eventId),
+    supabase
+      .from('event_guests')
+      .select('id, confirmed, rsvp_status')
+      .eq('event_id', eventId),
+    supabase
+      .from('event_tasks')
+      .select('id, completed, due_date')
+      .eq('event_id', eventId),
+    supabase
+      .from('event_expenses')
+      .select('id, value')
+      .eq('event_id', eventId),
+    supabase
+      .from('expense_payments')
+      .select('id, amount')
+      .eq('event_id', eventId),
+  ]);
 
   const vendors = vendorsRes.error ? [] : (vendorsRes.data ?? []);
   const guests = guestsRes.error ? [] : (guestsRes.data ?? []);
@@ -276,9 +384,7 @@ async function getFinanceSnapshot(
       .limit(2000),
   ]);
 
-  const baseBalance = balanceRes.error
-    ? 0
-    : normalizeNumber(balanceRes.data?.base_balance);
+  const baseBalance = balanceRes.error ? 0 : normalizeNumber(balanceRes.data?.base_balance);
   const entries = entriesRes.error ? [] : (entriesRes.data ?? []);
   const expenses = expensesRes.error ? [] : (expensesRes.data ?? []);
 
@@ -287,40 +393,28 @@ async function getFinanceSnapshot(
       const status = normalizeString((row as { status?: unknown }).status).toLowerCase();
       return status === 'confirmado' || status === 'pago';
     })
-    .reduce(
-      (sum, row) => sum + normalizeNumber((row as { amount?: unknown }).amount),
-      0
-    );
+    .reduce((sum, row) => sum + normalizeNumber((row as { amount?: unknown }).amount), 0);
 
   const plannedIn = entries
     .filter((row) => {
       const status = normalizeString((row as { status?: unknown }).status).toLowerCase();
       return status === 'pendente' || status === 'previsto' || status === 'parcelado';
     })
-    .reduce(
-      (sum, row) => sum + normalizeNumber((row as { amount?: unknown }).amount),
-      0
-    );
+    .reduce((sum, row) => sum + normalizeNumber((row as { amount?: unknown }).amount), 0);
 
   const confirmedOut = expenses
     .filter((row) => {
       const status = normalizeString((row as { status?: unknown }).status).toLowerCase();
       return status === 'confirmado' || status === 'pago' || status === 'parcelado';
     })
-    .reduce(
-      (sum, row) => sum + normalizeNumber((row as { amount?: unknown }).amount),
-      0
-    );
+    .reduce((sum, row) => sum + normalizeNumber((row as { amount?: unknown }).amount), 0);
 
   const plannedOut = expenses
     .filter((row) => {
       const status = normalizeString((row as { status?: unknown }).status).toLowerCase();
       return status === 'pendente' || status === 'previsto' || status === 'parcelado';
     })
-    .reduce(
-      (sum, row) => sum + normalizeNumber((row as { amount?: unknown }).amount),
-      0
-    );
+    .reduce((sum, row) => sum + normalizeNumber((row as { amount?: unknown }).amount), 0);
 
   return {
     base_balance: baseBalance,
@@ -358,7 +452,7 @@ async function getHelpDocs(
     .map((token) => token.trim())
     .filter((token) => token.length >= 3);
 
-  const scored = docs
+  return docs
     .map((row) => {
       const module = normalizeString(row.module);
       const title = normalizeString(row.title);
@@ -367,25 +461,15 @@ async function getHelpDocs(
         ? row.keywords.map((item) => normalizeString(item))
         : [];
 
-      const haystack = normalizeText(
-        `${module} ${title} ${content} ${keywords.join(' ')}`
+      const haystack = normalizeText(`${module} ${title} ${content} ${keywords.join(' ')}`);
+      const score = tokens.reduce(
+        (sum, token) => (token && haystack.includes(token) ? sum + 1 : sum),
+        0
       );
 
-      const score = tokens.reduce((sum, token) => {
-        if (!token) return sum;
-        return haystack.includes(token) ? sum + 1 : sum;
-      }, 0);
-
-      return {
-        module,
-        title,
-        content,
-        keywords,
-        score,
-      };
+      return { module, title, content, keywords, score };
     })
     .sort((a, b) => b.score - a.score)
-    .filter((row) => row.score > 0)
     .slice(0, 5)
     .map((row) => ({
       module: row.module,
@@ -393,27 +477,6 @@ async function getHelpDocs(
       content: row.content,
       keywords: row.keywords,
     }));
-
-  if (scored.length > 0) return scored;
-
-  return docs
-    .slice(0, 3)
-    .map((row) => ({
-      module: normalizeString(row.module),
-      title: normalizeString(row.title),
-      content: normalizeString(row.content),
-      keywords: Array.isArray(row.keywords)
-        ? row.keywords.map((item) => normalizeString(item))
-        : [],
-    }));
-}
-
-function formatMoney(value: number) {
-  return value.toLocaleString('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-    minimumFractionDigits: 2,
-  });
 }
 
 function buildFallbackAnswer(params: {
@@ -422,11 +485,82 @@ function buildFallbackAnswer(params: {
   event: EventSnapshot | null;
   finance: FinanceSnapshot;
 }): string {
-  const { userName, event, finance } = params;
+  const { userName, question, event, finance } = params;
+
+  if (isSmallTalk(question)) {
+    return `De nada, ${userName}. Se quiser, eu te ajudo no próximo passo agora (financeiro, cronograma, convidados, fornecedores ou torre de comando).`;
+  }
+
+  const topic = classifyQuestionTopic(question);
   const lines: string[] = [];
 
   lines.push(`Olá ${userName}, tudo bem?`);
   lines.push('');
+  if (topic === 'vendors') {
+    lines.push('Resumo do cenário');
+    if (event) {
+      lines.push(
+        `- No evento "${event.name}", há ${event.vendors_total} fornecedor(es) e ${event.vendors_without_schedule} sem horário definido.`
+      );
+    } else {
+      lines.push(
+        '- Não identifiquei um evento aberto agora, então vou te passar um fluxo prático de negociação.'
+      );
+    }
+    lines.push(
+      '- Quando um fornecedor não quer assinar contrato, o risco principal é operação sem garantia de escopo, prazo e multa.'
+    );
+
+    lines.push('');
+    lines.push('Passo a passo recomendado');
+    lines.push('1. Descubra a objeção real: prazo, cláusula de multa, forma de pagamento ou exclusividade.');
+    lines.push('2. Proponha versão simplificada com escopo fechado, entregáveis, horários, política de cancelamento e reajuste.');
+    lines.push('3. Formalize por assinatura eletrônica ou aceite por escrito (e-mail/WhatsApp) com os termos completos.');
+    lines.push('4. Defina plano B com fornecedor reserva e prazo limite para decisão.');
+
+    lines.push('');
+    lines.push('Como validar se ficou certo');
+    lines.push('- O fornecedor confirmou por escrito escopo, valor, datas e responsabilidades.');
+    lines.push('- O documento ficou anexado no evento para consulta da equipe.');
+    lines.push('- Existe contingência ativa caso o fornecedor recue.');
+
+    lines.push('');
+    lines.push('Se der erro');
+    lines.push('- Se ele continuar recusando formalização, não confirme reserva sem sinal e sem aceite registrado.');
+    lines.push('- Se quiser, te ajudo a montar uma mensagem curta de negociação para enviar agora.');
+
+    return lines.join('\n');
+  }
+
+  if (topic !== 'finance') {
+    lines.push('Resumo do cenário');
+    if (event) {
+      lines.push(
+        `- Evento atual: "${event.name}" com ${event.tasks_overdue} tarefa(s) atrasada(s), ${event.vendors_without_schedule} fornecedor(es) sem horário e ${event.guests_pending_rsvp} RSVP pendente(s).`
+      );
+    } else {
+      lines.push('- Não identifiquei um evento específico no contexto atual.');
+    }
+    lines.push('- Posso te orientar melhor se você me disser o módulo exato (fornecedores, convidados, cronograma, documentos ou financeiro).');
+
+    lines.push('');
+    lines.push('Passo a passo recomendado');
+    lines.push('1. Abra o evento que você quer ajustar.');
+    lines.push('2. Diga qual resultado você precisa agora (ex.: negociar fornecedor, confirmar convidados, corrigir atraso).');
+    lines.push('3. Eu te devolvo um plano objetivo com os próximos passos.');
+
+    lines.push('');
+    lines.push('Como validar se ficou certo');
+    lines.push('- A ação definida fica clara, com responsável e prazo.');
+    lines.push('- O ajuste aparece no módulo correto dentro do evento.');
+
+    lines.push('');
+    lines.push('Se der erro');
+    lines.push('- Se a tela não atualizar, recarregue e tente novamente.');
+    lines.push('- Se persistir, me diga a rota e o botão clicado para eu te orientar no ajuste exato.');
+    return lines.join('\n');
+  }
+
   lines.push('Resumo do cenário');
   lines.push(
     `- No seu financeiro geral: saldo em caixa estimado em ${formatMoney(finance.cash_balance)}, entradas programadas em ${formatMoney(finance.planned_in)} e saídas programadas em ${formatMoney(finance.planned_out)}.`
@@ -436,9 +570,6 @@ function buildFallbackAnswer(params: {
     lines.push(
       `- No evento "${event.name}": orçamento ${formatMoney(event.budget_total)}, gasto ${formatMoney(event.budget_spent)} e pendente para receber ${formatMoney(event.receivable_open)}.`
     );
-    lines.push(
-      `- Operação do evento: ${event.vendors_total} fornecedor(es), ${event.vendors_without_schedule} sem horário, ${event.guests_pending_rsvp} RSVP pendente(s) e ${event.tasks_overdue} tarefa(s) atrasada(s).`
-    );
   } else {
     lines.push(
       '- Não identifiquei um evento específico no contexto atual. Se você quiser orientação por evento, abra o evento e me pergunte novamente.'
@@ -447,16 +578,15 @@ function buildFallbackAnswer(params: {
 
   lines.push('');
   lines.push('Passo a passo recomendado');
-  lines.push('1. Defina a prioridade principal do momento: receber valores, ajustar fornecedores, confirmar convidados ou destravar cronograma.');
+  lines.push('1. Abra o Financeiro Geral e valide os cards principais.');
   if (event) {
-    lines.push(`2. Abra o evento "${event.name}" e corrija primeiro os itens críticos: tarefas vencidas e fornecedores sem horário.`);
-    lines.push('3. Na aba Financeiro do evento, confirme se cada pagamento lançado tem data, valor e método corretos.');
-    lines.push('4. Volte ao Financeiro Geral e valide se os cards refletiram os mesmos números do evento.');
+    lines.push(`2. Abra o evento "${event.name}" e confira a aba Financeiro.`);
+    lines.push('3. Compare lançamentos confirmados e previstos entre evento e financeiro geral.');
   } else {
     lines.push('2. Abra "Eventos" e escolha o evento em que você precisa de apoio.');
-    lines.push('3. Revise as abas Fornecedores, Convidados, Cronograma e Financeiro nessa ordem.');
-    lines.push('4. Depois valide no Financeiro Geral se os cards consolidaram os números.');
+    lines.push('3. Revise a aba Financeiro do evento e depois compare com os cards gerais.');
   }
+  lines.push('4. Se houver divergência, ajuste o lançamento na origem e salve novamente.');
 
   lines.push('');
   lines.push('Como validar se ficou certo');
@@ -492,21 +622,20 @@ async function callCloudflareAi(context: {
     throw new Error('missing_cloudflare_secrets');
   }
 
-  const endpoint =
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`;
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`;
 
   const systemPrompt = [
     'Você é a Plan, assistente especialista em operação de eventos dentro da plataforma Planejar Pro.',
     'Fale sempre em português do Brasil, com ortografia correta, tom educado e detalhado para usuário não técnico.',
     'Use os dados do contexto real (evento e financeiro). Não invente números.',
     'Se faltar dado, informe explicitamente que não encontrou.',
-    'Resposta obrigatoriamente com as seções abaixo, nessa ordem e com títulos idênticos:',
+    'Se a mensagem for cumprimento, agradecimento ou conversa curta, responda de forma breve e natural (sem relatório).',
+    'Para perguntas de diagnóstico da plataforma, use as seções:',
     '1) Resumo do cenário',
     '2) Passo a passo recomendado',
     '3) Como validar se ficou certo',
     '4) Se der erro',
-    'No passo a passo, escreva no mínimo 4 passos numerados.',
-    'Quando útil, cite o nome do evento e valores financeiros do contexto.',
+    'Se a pergunta for sobre negociação com fornecedor/contrato, responda focando o tema e não force diagnóstico financeiro.',
   ].join(' ');
 
   const userPrompt = JSON.stringify(
@@ -534,26 +663,27 @@ async function callCloudflareAi(context: {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: 1400,
+      max_tokens: 1300,
       temperature: 0.2,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`cloudflare_http_${response.status}`);
+    const body = await response.text();
+    throw new Error(`cloudflare_http_${response.status}:${body.slice(0, 220)}`);
   }
 
   const raw = (await response.json()) as Record<string, unknown>;
   const result = (raw.result ?? {}) as Record<string, unknown>;
 
-  const textCandidates = [
+  const candidates = [
     result.response,
     result.output_text,
     raw.response,
     raw.output_text,
   ];
 
-  for (const candidate of textCandidates) {
+  for (const candidate of candidates) {
     if (typeof candidate === 'string' && candidate.trim()) {
       return candidate.trim();
     }
@@ -562,7 +692,21 @@ async function callCloudflareAi(context: {
   throw new Error('empty_ai_response');
 }
 
-function ensureStructuredAnswer(answer: string, fallback: string, userName: string) {
+function ensureStructuredAnswer(
+  answer: string,
+  fallback: string,
+  userName: string,
+  question: string
+) {
+  if (isSmallTalk(answer) && answer.trim().length < 360) {
+    return answer;
+  }
+
+  if (!shouldForceStructuredSections(question)) {
+    if (answer.startsWith('Olá')) return answer;
+    return `Olá ${userName}, tudo bem?\n\n${answer.trim()}`;
+  }
+
   const requiredSections = [
     'Resumo do cenário',
     'Passo a passo recomendado',
@@ -570,33 +714,40 @@ function ensureStructuredAnswer(answer: string, fallback: string, userName: stri
     'Se der erro',
   ];
 
+  const normalized = normalizeText(answer);
   const hasAllSections = requiredSections.every((section) =>
-    answer.toLowerCase().includes(section.toLowerCase())
+    normalized.includes(normalizeText(section))
   );
 
-  if (!hasAllSections) return fallback;
+  if (!hasAllSections) {
+    if (answer.trim().length >= 80) {
+      return `Olá ${userName}, tudo bem?\n\n${answer.trim()}`;
+    }
+    return fallback;
+  }
 
-  const safeAnswer = answer.startsWith('Olá')
-    ? answer
-    : `Olá ${userName}, tudo bem?\n\n${answer}`;
-
-  return safeAnswer;
+  if (answer.startsWith('Olá')) return answer;
+  return `Olá ${userName}, tudo bem?\n\n${answer}`;
 }
 
 function buildSuggestedActions(params: {
   question: string;
-  path: string;
   hints: SuggestedAction[];
   event: EventSnapshot | null;
 }) {
-  const actions: SuggestedAction[] = [...params.hints];
+  const actions: SuggestedAction[] = [];
   const normalizedQuestion = normalizeText(params.question);
 
-  if (params.event) {
-    actions.push({
-      label: `Abrir ${params.event.name}`,
-      path: `/dashboard/eventos/${params.event.id}`,
-    });
+  if (isSmallTalk(params.question)) return [];
+  if (!asksNavigationIntent(params.question)) return [];
+
+  const asksAlerts =
+    normalizedQuestion.includes('alerta') ||
+    normalizedQuestion.includes('pendenc') ||
+    normalizedQuestion.includes('prioridad');
+
+  if (asksAlerts && params.hints.length > 0) {
+    actions.push(...params.hints.slice(0, 1));
   }
 
   if (
@@ -609,25 +760,29 @@ function buildSuggestedActions(params: {
   }
 
   if (
-    normalizedQuestion.includes('rsvp') ||
-    normalizedQuestion.includes('convidad')
+    params.event &&
+    (
+      normalizedQuestion.includes('evento') ||
+      normalizedQuestion.includes('fornecedor') ||
+      normalizedQuestion.includes('cronograma') ||
+      normalizedQuestion.includes('convidad') ||
+      normalizedQuestion.includes('buffet') ||
+      normalizedQuestion.includes('tarefa')
+    )
   ) {
-    actions.push({ label: 'Abrir eventos', path: '/dashboard/eventos' });
+    actions.push({
+      label: `Abrir ${params.event.name}`,
+      path: `/dashboard/eventos/${params.event.id}`,
+    });
   }
 
   if (
     normalizedQuestion.includes('fornecedor') ||
     normalizedQuestion.includes('cronograma') ||
-    normalizedQuestion.includes('torre')
+    normalizedQuestion.includes('rsvp') ||
+    normalizedQuestion.includes('convidad')
   ) {
     actions.push({ label: 'Abrir eventos', path: '/dashboard/eventos' });
-  }
-
-  if (actions.length === 0) {
-    actions.push({
-      label: 'Abrir dashboard',
-      path: params.path.startsWith('/dashboard') ? params.path : '/dashboard',
-    });
   }
 
   return uniqActions(actions);
@@ -697,6 +852,9 @@ Deno.serve(async (request) => {
   });
 
   let answer = fallbackAnswer;
+  let aiUsed = false;
+  let aiError: string | null = null;
+
   try {
     const aiAnswer = await callCloudflareAi({
       userName,
@@ -707,14 +865,15 @@ Deno.serve(async (request) => {
       docs: helpDocs,
       hints,
     });
-    answer = ensureStructuredAnswer(aiAnswer, fallbackAnswer, userName);
+    answer = ensureStructuredAnswer(aiAnswer, fallbackAnswer, userName, question);
+    aiUsed = true;
   } catch (error) {
+    aiError = error instanceof Error ? error.message : 'ai_unknown_error';
     console.error('plan-assistant-chat ai_error', error);
   }
 
   const suggestedActions = buildSuggestedActions({
     question,
-    path: currentPath,
     hints,
     event: eventSnapshot,
   });
@@ -722,9 +881,12 @@ Deno.serve(async (request) => {
   return jsonResponse(200, {
     answer,
     suggested_actions: suggestedActions,
+    meta: {
+      ai_used: aiUsed,
+      ai_error: aiError,
+    },
     context: {
       event_id: eventSnapshot?.id ?? null,
     },
   });
 });
-

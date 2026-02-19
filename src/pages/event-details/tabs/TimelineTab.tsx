@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 
 type NewTimelineItem = {
@@ -47,7 +47,7 @@ export function TimelineTab<TItem extends TimelineItem>({
           onChange={(e) =>
             setNewTimelineItem((p) => ({ ...p, activity: e.target.value }))
           }
-          placeholder="Atividade (ex: Cerimônia)"
+          placeholder="Atividade do dia (ex: abertura da cerimônia)"
           className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
         />
 
@@ -101,10 +101,11 @@ export function TimelineTab<TItem extends TimelineItem>({
 
         {timeline.length === 0 && (
           <p className="text-gray-600 py-8 text-center">
-            Nenhum item no cronograma ainda.
+            Nenhum item no cronograma do dia ainda.
           </p>
         )}
       </div>
     </div>
   );
 }
+

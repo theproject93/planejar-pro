@@ -42,6 +42,29 @@ Centralizar tarefas, convidados, mesas, orçamento e informações do evento em 
 - `npm run build` [cite:16]
 - `npm run preview` [cite:16]
 - `npm run lint` [cite:16]
+- `npm run e2e`
+- `npm run e2e:headed`
+- `npm run e2e:ui`
+
+## Estabilizacao (14 dias)
+- Checklist de aceite dos fluxos criticos:
+  - `docs/stabilization/critical-flows-acceptance-checklist.md`
+- Script de sanity check pos-migration:
+  - `scripts/sanity-check.ps1`
+  - Execucao completa: `.\scripts\sanity-check.ps1`
+  - Sem E2E: `.\scripts\sanity-check.ps1 -SkipE2E`
+
+## CI (GitHub Actions)
+- Workflow: `.github/workflows/ci.yml`
+- Executa:
+  - lint
+  - build
+  - e2e (Playwright)
+- Secrets recomendados no repositorio:
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+  - `E2E_EMAIL`
+  - `E2E_PASSWORD`
 
 ## Deploy (SPA)
 Há um `public/_redirects` para suporte a rotas SPA em hosts como Netlify. [cite:20]

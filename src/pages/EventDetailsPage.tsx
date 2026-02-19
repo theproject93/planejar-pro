@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Calendar,
@@ -130,6 +130,7 @@ function composePaymentNote(
 
 type Tab =
   | 'overview'
+  | 'history'
   | 'tasks'
   | 'budget'
   | 'guests'
@@ -140,6 +141,21 @@ type Tab =
   | 'team'
   | 'tables'
   | 'invites';
+
+const TAB_QUERY_MAP: Record<string, Tab> = {
+  overview: 'overview',
+  history: 'history',
+  tasks: 'tasks',
+  budget: 'budget',
+  guests: 'guests',
+  timeline: 'timeline',
+  vendors: 'vendors',
+  documents: 'documents',
+  notes: 'notes',
+  team: 'team',
+  tables: 'tables',
+  invites: 'invites',
+};
 
 type EventRow = {
   id: string;
@@ -155,6 +171,7 @@ type EventRow = {
   guests_planned: number | null;
   invite_message_template?: string | null;
   invite_dress_code?: string | null;
+  created_at?: string | null;
   updated_at?: string | null;
 };
 
@@ -273,6 +290,23 @@ type TeamMemberRow = {
   address?: string | null;
   role?: string | null;
   created_at?: string;
+};
+
+type ProjectMilestone = {
+  id: string;
+  date: Date;
+  dayNumber: number;
+  title: string;
+  detail: string;
+  kind:
+    | 'start'
+    | 'vendor'
+    | 'guest'
+    | 'expense'
+    | 'document'
+    | 'payment'
+    | 'invite'
+    | 'rsvp';
 };
 
 type TableRow = {
@@ -424,6 +458,7 @@ const PRIORITY_CONFIG = {
 // --------------------
 export function EventDetailsPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const eventId = id ?? '';
   const { user, session } = useAuth();
 
@@ -433,13 +468,36 @@ export function EventDetailsPage() {
 
   const [activeTab, setActiveTab] = useState<Tab>('overview');
 
+  function switchTab(nextTab: Tab) {
+    setActiveTab(nextTab);
+    setSearchParams(
+      (previous) => {
+        const params = new URLSearchParams(previous);
+        if (nextTab === 'overview') params.delete('tab');
+        else params.set('tab', nextTab);
+        return params;
+      },
+      { replace: true }
+    );
+  }
+
+  useEffect(() => {
+    const requestedTab = TAB_QUERY_MAP[searchParams.get('tab') ?? ''];
+    if (requestedTab && requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
+    }
+    if (!requestedTab && activeTab !== 'overview') {
+      setActiveTab('overview');
+    }
+  }, [activeTab, searchParams, eventId]);
+
   // filtro: Fornecedor -> Financeiro
   const [budgetVendorFilterId, setBudgetVendorFilterId] = useState<
     string | null
   >(null);
   function goToBudgetFilteredByVendor(vendorId: string) {
     setBudgetVendorFilterId(vendorId);
-    setActiveTab('budget');
+    switchTab('budget');
   }
   function clearBudgetVendorFilter() {
     setBudgetVendorFilterId(null);
@@ -454,12 +512,12 @@ export function EventDetailsPage() {
   function goToDocumentById(documentId: string) {
     setDocumentsVendorFilterId(null);
     setDocumentsReceiptFilterId(documentId);
-    setActiveTab('documents');
+    switchTab('documents');
   }
   function goToDocumentsFilteredByVendor(vendorId: string) {
     setDocumentsReceiptFilterId(null);
     setDocumentsVendorFilterId(vendorId);
-    setActiveTab('documents');
+    switchTab('documents');
   }
 
   const [tableViewMode, setTableViewMode] = useState<'list' | 'map'>('list');
@@ -479,9 +537,6 @@ export function EventDetailsPage() {
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [isAddingExpense, setIsAddingExpense] = useState(false);
-  const [vendorStatuses, setVendorStatuses] = useState<
-    { vendor_id: string; status: 'pending' | 'en_route' | 'arrived' | 'done'; created_at: string }[]
-  >([]);
 
   const [guests, setGuests] = useState<GuestRow[]>([]);
   const [timeline, setTimeline] = useState<TimelineRow[]>([]);
@@ -499,6 +554,7 @@ export function EventDetailsPage() {
   const [lastAiTimelineRunAt, setLastAiTimelineRunAt] = useState<string | null>(
     null
   );
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
 
   const paymentReceiptCountByVendor = useMemo(() => {
     const documentsById = new Map(documents.map((doc) => [doc.id, doc]));
@@ -671,6 +727,249 @@ export function EventDetailsPage() {
     () => pendingTasks.filter((t) => isOverdue(t.due_date)),
     [pendingTasks]
   );
+  const projectMilestones = useMemo<ProjectMilestone[]>(() => {
+    const startDateText = event?.created_at ?? event?.updated_at ?? null;
+    if (!startDateText) return [];
+    const startDate = new Date(startDateText);
+    if (Number.isNaN(startDate.getTime())) return [];
+
+    const toDayNumber = (value: string | null | undefined) => {
+      if (!value) return 1;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return 1;
+      const diffMs = date.getTime() - startDate.getTime();
+      return Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1);
+    };
+
+    const milestones: ProjectMilestone[] = [
+      {
+        id: `project-start-${event?.id ?? 'event'}`,
+        date: startDate,
+        dayNumber: 1,
+        title: 'Início do projeto',
+        detail: `Começamos a trabalhar com ${displayName}.`,
+        kind: 'start',
+      },
+    ];
+
+    vendors.forEach((vendor) => {
+      const createdAt = vendor.created_at;
+      if (!createdAt) return;
+      const date = new Date(createdAt);
+      if (Number.isNaN(date.getTime())) return;
+      milestones.push({
+        id: `vendor-${vendor.id}`,
+        date,
+        dayNumber: toDayNumber(createdAt),
+        title: 'Fornecedor incluído',
+        detail: `${vendor.name} (${vendor.category}) foi adicionado.`,
+        kind: 'vendor',
+      });
+    });
+
+    guests.forEach((guest) => {
+      const createdAt = guest.created_at;
+      if (!createdAt) return;
+      const date = new Date(createdAt);
+      if (Number.isNaN(date.getTime())) return;
+      milestones.push({
+        id: `guest-${guest.id}`,
+        date,
+        dayNumber: toDayNumber(createdAt),
+        title: 'Convidado incluído',
+        detail: `${guest.name} entrou na lista de convidados.`,
+        kind: 'guest',
+      });
+    });
+
+    expenses.forEach((expense) => {
+      const createdAt = expense.created_at;
+      if (!createdAt) return;
+      const date = new Date(createdAt);
+      if (Number.isNaN(date.getTime())) return;
+      milestones.push({
+        id: `expense-${expense.id}`,
+        date,
+        dayNumber: toDayNumber(createdAt),
+        title: 'Lançamento financeiro',
+        detail: `${expense.name} foi lançado (${toBRL(Number(expense.value || 0))}).`,
+        kind: 'expense',
+      });
+    });
+
+    documents.forEach((document) => {
+      const createdAt = document.created_at;
+      if (!createdAt) return;
+      const date = new Date(createdAt);
+      if (Number.isNaN(date.getTime())) return;
+      milestones.push({
+        id: `document-${document.id}`,
+        date,
+        dayNumber: toDayNumber(createdAt),
+        title: 'Documento anexado',
+        detail: `${document.name} foi anexado ao evento.`,
+        kind: 'document',
+      });
+    });
+
+    payments.forEach((payment) => {
+      const createdAt = payment.created_at ?? payment.paid_at;
+      if (!createdAt) return;
+      const date = new Date(createdAt);
+      if (Number.isNaN(date.getTime())) return;
+      milestones.push({
+        id: `payment-${payment.id}`,
+        date,
+        dayNumber: toDayNumber(createdAt),
+        title: 'Pagamento registrado',
+        detail: `Pagamento de ${toBRL(Number(payment.amount || 0))} foi lançado.`,
+        kind: 'payment',
+      });
+    });
+
+    guests.forEach((guest) => {
+      if (guest.invited_at) {
+        const date = new Date(guest.invited_at);
+        if (!Number.isNaN(date.getTime())) {
+          milestones.push({
+            id: `invite-${guest.id}`,
+            date,
+            dayNumber: toDayNumber(guest.invited_at),
+            title: 'Convite enviado',
+            detail: `Convite enviado para ${guest.name}.`,
+            kind: 'invite',
+          });
+        }
+      }
+
+      if (guest.responded_at) {
+        const date = new Date(guest.responded_at);
+        if (!Number.isNaN(date.getTime())) {
+          const rsvpStatus = normalizeGuestRsvpStatus(guest);
+          const statusLabel =
+            rsvpStatus === 'confirmed'
+              ? 'confirmou presença'
+              : rsvpStatus === 'declined'
+                ? 'recusou presença'
+                : 'respondeu o convite';
+          milestones.push({
+            id: `rsvp-${guest.id}`,
+            date,
+            dayNumber: toDayNumber(guest.responded_at),
+            title: 'RSVP atualizado',
+            detail: `${guest.name} ${statusLabel}.`,
+            kind: 'rsvp',
+          });
+        }
+      }
+    });
+
+    return milestones
+      .sort((a, b) => a.date.getTime() - b.date.getTime())
+      .slice(0, 140);
+  }, [
+    event?.created_at,
+    event?.updated_at,
+    event?.id,
+    displayName,
+    vendors,
+    guests,
+    expenses,
+    documents,
+    payments,
+  ]);
+  const historyTimelineNodes = useMemo(() => {
+    const nodes = [...projectMilestones];
+    const startDateText = event?.created_at ?? event?.updated_at ?? null;
+    const startDate = startDateText ? new Date(startDateText) : null;
+    const eventDate = event?.event_date ? new Date(event.event_date) : null;
+
+    if (
+      startDate &&
+      eventDate &&
+      !Number.isNaN(startDate.getTime()) &&
+      !Number.isNaN(eventDate.getTime())
+    ) {
+      const diffMs = eventDate.getTime() - startDate.getTime();
+      const dayNumber = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1);
+      nodes.push({
+        id: `event-day-${event?.id ?? 'event'}`,
+        date: eventDate,
+        dayNumber,
+        title: 'Data do evento',
+        detail: `Marco final: ${eventDate.toLocaleDateString('pt-BR')}.`,
+        kind: 'start',
+      });
+    }
+
+    return nodes.sort((a, b) => a.date.getTime() - b.date.getTime());
+  }, [projectMilestones, event?.created_at, event?.updated_at, event?.event_date, event?.id]);
+
+  const selectedHistoryIndex = useMemo(() => {
+    if (!selectedHistoryId) return -1;
+    return historyTimelineNodes.findIndex((item) => item.id === selectedHistoryId);
+  }, [historyTimelineNodes, selectedHistoryId]);
+
+  const historyProgress = useMemo(() => {
+    if (historyTimelineNodes.length <= 1) return 100;
+    const safeIndex = Math.max(0, selectedHistoryIndex);
+    return (safeIndex / (historyTimelineNodes.length - 1)) * 100;
+  }, [historyTimelineNodes.length, selectedHistoryIndex]);
+
+  useEffect(() => {
+    if (historyTimelineNodes.length === 0) {
+      setSelectedHistoryId(null);
+      return;
+    }
+    const exists = historyTimelineNodes.some((item) => item.id === selectedHistoryId);
+    if (!selectedHistoryId || !exists) {
+      setSelectedHistoryId(historyTimelineNodes[0].id);
+    }
+  }, [historyTimelineNodes, selectedHistoryId]);
+
+  useEffect(() => {
+    if (activeTab !== 'history' || historyTimelineNodes.length <= 1) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setSelectedHistoryId((previous) => {
+        const currentIndex = historyTimelineNodes.findIndex(
+          (item) => item.id === previous
+        );
+        if (currentIndex < 0 || currentIndex >= historyTimelineNodes.length - 1) {
+          return historyTimelineNodes[0].id;
+        }
+        return historyTimelineNodes[currentIndex + 1].id;
+      });
+    }, 2200);
+
+    return () => window.clearInterval(timer);
+  }, [activeTab, historyTimelineNodes]);
+
+  function getMilestoneColor(kind: ProjectMilestone['kind']) {
+    switch (kind) {
+      case 'start':
+        return 'bg-violet-500';
+      case 'vendor':
+        return 'bg-cyan-500';
+      case 'guest':
+        return 'bg-emerald-500';
+      case 'expense':
+        return 'bg-amber-500';
+      case 'document':
+        return 'bg-fuchsia-500';
+      case 'payment':
+        return 'bg-green-600';
+      case 'invite':
+        return 'bg-sky-500';
+      case 'rsvp':
+        return 'bg-indigo-500';
+      default:
+        return 'bg-gray-500';
+    }
+  }
+
   const todayTasks = useMemo(
     () => pendingTasks.filter((t) => isToday(t.due_date)),
     [pendingTasks]
@@ -726,24 +1025,9 @@ export function EventDetailsPage() {
     unconfirmedGuests,
   ]);
 
-  const latestVendorStatus = useMemo(() => {
-    const map = new Map<
-      string,
-      { status: 'pending' | 'en_route' | 'arrived' | 'done'; created_at: string }
-    >();
-    vendorStatuses.forEach((row) => {
-      if (!map.has(row.vendor_id)) {
-        map.set(row.vendor_id, row);
-      }
-    });
-    return map;
-  }, [vendorStatuses]);
-
   const vendorChecklist = useMemo(() => {
     if (!event?.event_date) return [];
-    const now = new Date();
     return vendors.map((vendor) => {
-      const status = latestVendorStatus.get(vendor.id)?.status ?? 'pending';
       const expectedArrival = combineDateTime(
         event.event_date,
         vendor.expected_arrival_time ?? null
@@ -752,23 +1036,16 @@ export function EventDetailsPage() {
         event.event_date,
         vendor.expected_done_time ?? null
       );
-      const arrivalOverdue =
-        expectedArrival && now > expectedArrival && status !== 'arrived' && status !== 'done';
-      const doneOverdue =
-        expectedDone && now > expectedDone && status !== 'done';
 
       return {
         id: vendor.id,
         name: vendor.name,
         category: vendor.category,
-        status,
         expectedArrival,
         expectedDone,
-        arrivalOverdue,
-        doneOverdue,
       };
     });
-  }, [vendors, latestVendorStatus, event?.event_date]);
+  }, [vendors, event?.event_date]);
 
   const smartTimelineSuggestions = useMemo(() => {
     const existingActivities = timeline.map((item) => normalizeText(item.activity));
@@ -783,89 +1060,89 @@ export function EventDetailsPage() {
 
     if (timeline.length === 0) {
       list.push({
-        id: 'base-cerimonia',
-        title: 'Estruturar cronograma inicial',
-        reason: 'O evento ainda não possui itens no cronograma.',
-        activity: 'Cerimônia e recepção: estrutura base',
-        time: '15:00',
+        id: 'base-dia',
+        title: 'Estruturar cronograma do dia',
+        reason: 'O evento ainda não possui itens no cronograma do dia.',
+        activity: 'Briefing inicial da operação do dia',
+        time: '08:00',
         assignee: 'Assessoria',
         priority: 'high',
         source: 'rules',
       });
     }
 
-    if (daysRemaining > 0 && daysRemaining <= 30 && !hasActivityLike('reuniao final')) {
+    if (!hasActivityLike('check-in de fornecedores')) {
       list.push({
-        id: 'reuniao-final',
-        title: 'Agendar reunião final com noivos',
-        reason: `Faltam ${daysRemaining} dias para o evento.`,
-        activity: 'Reunião final com noivos e validação de roteiro',
-        time: '10:00',
-        assignee: 'Assessoria',
+        id: 'checkin-fornecedores',
+        title: 'Inserir check-in de fornecedores',
+        reason: 'Garante controle de chegada e status em tempo real no dia do evento.',
+        activity: 'Check-in de fornecedores na chegada',
+        time: '09:00',
+        assignee: 'Coordenação',
         priority: 'high',
         source: 'rules',
       });
     }
 
-    if (daysRemaining > 0 && daysRemaining <= 14 && unconfirmedGuests > 0 && !hasActivityLike('fechamento de convidados')) {
+    if (missingScheduleCount > 0 && !hasActivityLike('alinhamento de horarios dos fornecedores')) {
       list.push({
-        id: 'fechamento-convidados',
-        title: 'Fechar lista de convidados',
-        reason: `${unconfirmedGuests} convidados ainda não confirmaram presença.`,
-        activity: 'Fechamento de convidados e mesas',
-        time: '11:00',
-        assignee: 'Recepção',
-        priority: 'high',
-        source: 'rules',
-      });
-    }
-
-    if (missingScheduleCount > 0 && !hasActivityLike('alinhamento final de fornecedores')) {
-      list.push({
-        id: 'alinhamento-fornecedores',
+        id: 'alinhamento-fornecedores-dia',
         title: 'Alinhar horários dos fornecedores',
-        reason: `${missingScheduleCount} fornecedor(es) sem horários completos.`,
-        activity: 'Alinhamento final de fornecedores',
-        time: '14:00',
+        reason: `${missingScheduleCount} fornecedor(es) sem horário completo para operação do dia.`,
+        activity: 'Alinhamento de horários dos fornecedores',
+        time: '09:30',
+        assignee: 'Coordenação',
+        priority: 'high',
+        source: 'rules',
+      });
+    }
+
+    if (!hasActivityLike('abertura da cerimonia')) {
+      list.push({
+        id: 'abertura-cerimonia',
+        title: 'Planejar abertura da cerimônia',
+        reason: 'Define gatilho claro para início da cerimônia sem atraso.',
+        activity: 'Abertura da cerimônia e posicionamento da equipe',
+        time: '15:30',
         assignee: 'Coordenação',
         priority: 'normal',
         source: 'rules',
       });
     }
 
-    if (overdueTasks.length > 0 && !hasActivityLike('mutirao de pendencias')) {
+    if (!hasActivityLike('transicao para recepcao')) {
       list.push({
-        id: 'mutirao-pendencias',
-        title: 'Executar mutirão de pendências',
-        reason: `${overdueTasks.length} tarefa(s) estão atrasadas.`,
-        activity: 'Mutirão de pendências críticas',
-        time: '09:00',
-        assignee: 'Equipe interna',
+        id: 'transicao-recepcao',
+        title: 'Organizar transição para recepção',
+        reason: 'Evita fila e ruído na troca de cerimônia para recepção.',
+        activity: 'Transição para recepção com alinhamento de fornecedores',
+        time: '17:00',
+        assignee: 'Recepção',
         priority: 'high',
         source: 'rules',
       });
     }
 
-    if (budgetProgress >= 85 && !hasActivityLike('revisao financeira final')) {
+    if (!hasActivityLike('encerramento e desmontagem')) {
       list.push({
-        id: 'revisao-financeira',
-        title: 'Fazer revisão financeira final',
-        reason: `O orçamento já está em ${budgetProgress.toFixed(0)}%.`,
-        activity: 'Revisão financeira final e ajustes de custo',
-        time: '16:00',
-        assignee: 'Financeiro',
+        id: 'encerramento-desmontagem',
+        title: 'Definir encerramento e desmontagem',
+        reason: 'Fecha o dia com checklist de saída e redução de risco operacional.',
+        activity: 'Encerramento do evento e desmontagem assistida',
+        time: '23:30',
+        assignee: 'Assessoria',
         priority: 'normal',
         source: 'rules',
       });
     }
 
-    if (daysRemaining > 0 && daysRemaining <= 3 && !hasActivityLike('briefing geral da equipe')) {
+    if (overdueTasks.length > 0 && !hasActivityLike('janela para pendencias criticas do dia')) {
       list.push({
-        id: 'briefing-equipe',
-        title: 'Realizar briefing geral da equipe',
-        reason: `Faltam apenas ${daysRemaining} dias para o evento.`,
-        activity: 'Briefing geral da equipe operacional',
-        time: '18:00',
+        id: 'pendencias-criticas-dia',
+        title: 'Reservar janela para pendências críticas',
+        reason: `${overdueTasks.length} pendência(s) pode(m) impactar a operação no dia.`,
+        activity: 'Janela para pendências críticas do dia',
+        time: '12:00',
         assignee: 'Assessoria',
         priority: 'high',
         source: 'rules',
@@ -876,10 +1153,7 @@ export function EventDetailsPage() {
   }, [
     timeline,
     vendors,
-    daysRemaining,
-    unconfirmedGuests,
     overdueTasks.length,
-    budgetProgress,
   ]);
 
   const timelineSuggestions = useMemo(() => {
@@ -929,7 +1203,6 @@ export function EventDetailsPage() {
           guestsRes,
           timelineRes,
           vendorsRes,
-          vendorStatusRes,
           docsRes,
           notesRes,
           teamRes,
@@ -938,7 +1211,7 @@ export function EventDetailsPage() {
           supabase
             .from(T_EVENTS)
             .select(
-              'id, user_id, name, event_type, event_date, location, status, couple, couple_photo_url, budget_total, guests_planned, invite_message_template, invite_dress_code, updated_at'
+              'id, user_id, name, event_type, event_date, location, status, couple, couple_photo_url, budget_total, guests_planned, invite_message_template, invite_dress_code, created_at, updated_at'
             )
             .eq('id', eventId)
             .eq('user_id', user.id)
@@ -974,11 +1247,6 @@ export function EventDetailsPage() {
             .eq('event_id', eventId)
             .order('created_at', { ascending: true }),
           supabase
-            .from('event_vendor_status')
-            .select('vendor_id, status, created_at')
-            .eq('event_id', eventId)
-            .order('created_at', { ascending: false }),
-          supabase
             .from(T_DOCUMENTS)
             .select('*')
             .eq('event_id', eventId)
@@ -1007,7 +1275,6 @@ export function EventDetailsPage() {
         if (guestsRes.error) throw guestsRes.error;
         if (timelineRes.error) throw timelineRes.error;
         if (vendorsRes.error) throw vendorsRes.error;
-        if (vendorStatusRes.error) throw vendorStatusRes.error;
         if (docsRes.error) throw docsRes.error;
         if (notesRes.error) throw notesRes.error;
         if (teamRes.error) throw teamRes.error;
@@ -1068,7 +1335,6 @@ export function EventDetailsPage() {
         setGuests((guestsRes.data as GuestRow[]) ?? []);
         setTimeline((timelineRes.data as TimelineRow[]) ?? []);
         setVendors((vendorsRes.data as VendorRow[]) ?? []);
-        setVendorStatuses((vendorStatusRes.data as any[]) ?? []);
         setDocuments((docsRes.data as DocumentRow[]) ?? []);
         setNotes((notesRes.data as NoteRow[]) ?? []);
         setTeam((teamRes.data as TeamMemberRow[]) ?? []);
@@ -1808,6 +2074,7 @@ export function EventDetailsPage() {
 
       const payload = {
         source: 'planejar-pro',
+        scope: 'cronograma_do_dia',
         event: {
           id: event.id,
           name: displayName,
@@ -1816,23 +2083,16 @@ export function EventDetailsPage() {
           location: event.location,
         },
         metrics: {
-          days_remaining: daysRemaining,
-          budget_progress: Number(budgetProgress.toFixed(2)),
-          pending_tasks_count: pendingTasks.length,
           overdue_tasks_count: overdueTasks.length,
-          pending_guests_count: unconfirmedGuests,
           vendors_count: vendors.length,
+          missing_vendor_schedule_count: vendors.filter(
+            (vendor) => !vendor.expected_arrival_time || !vendor.expected_done_time
+          ).length,
         },
         timeline: timeline.slice(0, 40).map((item) => ({
           time: item.time,
           activity: item.activity,
           assignee: item.assignee_name ?? '',
-        })),
-        tasks: pendingTasks.slice(0, 40).map((task) => ({
-          text: task.text,
-          due_date: task.due_date ?? null,
-          priority: task.priority ?? 'normal',
-          assignee: task.assignee_name ?? null,
         })),
         vendors: vendors.slice(0, 50).map((vendor) => ({
           name: vendor.name,
@@ -2181,6 +2441,16 @@ export function EventDetailsPage() {
       setErrorMsg(err.message);
     }
   }
+
+  function openModule(nextTab: Tab) {
+    switchTab(nextTab);
+    if (nextTab !== 'budget') setBudgetVendorFilterId(null);
+    if (nextTab !== 'documents') {
+      setDocumentsVendorFilterId(null);
+      setDocumentsReceiptFilterId(null);
+    }
+  }
+
   // --------------------
   // UI (trechos relevantes)
   // --------------------
@@ -2320,9 +2590,17 @@ export function EventDetailsPage() {
 
         {/* Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-pink-500">
+          <button
+            type="button"
+            onClick={() => openModule('history')}
+            className={`text-left bg-white rounded-xl shadow-sm p-5 border-l-4 border-pink-500 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300 ${
+              activeTab === 'history'
+                ? 'ring-2 ring-pink-200 shadow-md'
+                : 'hover:shadow-lg hover:-translate-y-0.5 hover:ring-1 hover:ring-pink-100 active:scale-[0.99]'
+            }`}
+          >
             <div className="flex items-center justify-between">
-              <p className="text-gray-600 text-sm">Contagem</p>
+              <p className="text-gray-600 text-sm">Contagem Regressiva</p>
               <Clock className="w-6 h-6 text-pink-500" />
             </div>
             <p className="text-2xl font-bold text-gray-800 mt-2">
@@ -2332,16 +2610,34 @@ export function EventDetailsPage() {
                   : `${daysRemaining} dias`
                 : '-'}
             </p>
-          </div>
+          </button>
 
-          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-yellow-500">
+          <div
+            className={`bg-white rounded-xl shadow-sm p-5 border-l-4 border-yellow-500 transition-all cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-300 ${
+              activeTab === 'budget'
+                ? 'ring-2 ring-yellow-200 shadow-md'
+                : 'hover:shadow-lg hover:-translate-y-0.5 hover:ring-1 hover:ring-yellow-100 active:scale-[0.99]'
+            }`}
+            role="button"
+            tabIndex={0}
+            onClick={() => openModule('budget')}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openModule('budget');
+              }
+            }}
+          >
             <div className="flex items-center justify-between">
-              <p className="text-gray-600 text-sm">Orçamento</p>
+              <p className="text-gray-600 text-sm">Orçamento & Financeiro</p>
               <div className="flex items-center gap-2">
                 {!isBudgetCardEditing && (
                   <button
                     type="button"
-                    onClick={() => setIsBudgetCardEditing(true)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setIsBudgetCardEditing(true);
+                    }}
                     className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"
                     title="Editar orçamento total"
                     disabled={savingBudgetCard}
@@ -2367,7 +2663,8 @@ export function EventDetailsPage() {
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={(event) => {
+                      event.stopPropagation();
                       setBudgetCardDraft(String(budgetTotal));
                       setIsBudgetCardEditing(false);
                     }}
@@ -2378,7 +2675,10 @@ export function EventDetailsPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={saveBudgetFromCard}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void saveBudgetFromCard();
+                    }}
                     className="px-3 py-1.5 rounded-lg bg-yellow-500 text-white hover:bg-yellow-600 text-sm disabled:opacity-60"
                     disabled={savingBudgetCard}
                   >
@@ -2400,9 +2700,17 @@ export function EventDetailsPage() {
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-blue-500">
+          <button
+            type="button"
+            onClick={() => openModule('tasks')}
+            className={`text-left bg-white rounded-xl shadow-sm p-5 border-l-4 border-blue-500 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${
+              activeTab === 'tasks'
+                ? 'ring-2 ring-blue-200 shadow-md'
+                : 'hover:shadow-lg hover:-translate-y-0.5 hover:ring-1 hover:ring-blue-100 active:scale-[0.99]'
+            }`}
+          >
             <div className="flex items-center justify-between">
-              <p className="text-gray-600 text-sm">Tarefas</p>
+              <p className="text-gray-600 text-sm">Checklist</p>
               <CheckSquare className="w-6 h-6 text-blue-500" />
             </div>
             <p className="text-2xl font-bold text-gray-800 mt-2">
@@ -2414,9 +2722,17 @@ export function EventDetailsPage() {
                 style={{ width: `${tasksProgress}%` }}
               />
             </div>
-          </div>
+          </button>
 
-          <div className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-green-500">
+          <button
+            type="button"
+            onClick={() => openModule('guests')}
+            className={`text-left bg-white rounded-xl shadow-sm p-5 border-l-4 border-green-500 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 ${
+              activeTab === 'guests'
+                ? 'ring-2 ring-green-200 shadow-md'
+                : 'hover:shadow-lg hover:-translate-y-0.5 hover:ring-1 hover:ring-green-100 active:scale-[0.99]'
+            }`}
+          >
             <div className="flex items-center justify-between">
               <p className="text-gray-600 text-sm">Convidados</p>
               <Users className="w-6 h-6 text-green-500" />
@@ -2424,58 +2740,92 @@ export function EventDetailsPage() {
             <p className="text-2xl font-bold text-gray-800 mt-2">
               {confirmedGuests}/{guests.length}
             </p>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
-          {(
-            [
-              'overview',
-              'tasks',
-              'budget',
-              'guests',
-              'timeline',
-              'vendors',
-              'documents',
-              'notes',
-              'team',
-              'tables',
-              'invites',
-            ] as Tab[]
-          ).map((t) => (
-            <button
-              key={t}
-              onClick={() => {
-                setActiveTab(t);
-                if (t !== 'budget') setBudgetVendorFilterId(null);
-                if (t !== 'documents') {
-                  setDocumentsVendorFilterId(null);
-                  setDocumentsReceiptFilterId(null);
-                }
-              }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
-                activeTab === t
-                  ? 'bg-white shadow-sm text-pink-600'
-                  : 'text-gray-600 hover:bg-white/60'
-              }`}
-            >
-              {t === 'overview' && 'Visão geral'}
-              {t === 'tasks' && 'Checklist'}
-              {t === 'budget' && 'Financeiro'}
-              {t === 'guests' && 'Convidados'}
-              {t === 'timeline' && 'Cronograma'}
-              {t === 'vendors' && 'Fornecedores'}
-              {t === 'documents' && 'Documentos'}
-              {t === 'notes' && 'Notas'}
-              {t === 'team' && 'Equipe'}
-              {t === 'tables' && 'Mapa de Mesas'}
-              {t === 'invites' && 'Convites'}
-            </button>
-          ))}
+          </button>
         </div>
 
         {/* Conteúdo */}
+        {activeTab === 'history' && (
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div className="mb-5">
+              <h3 className="text-lg font-bold text-gray-900">
+                Linha do projeto interativa
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Linha contínua com marcos do que foi, está e será feito.
+              </p>
+            </div>
+
+            {historyTimelineNodes.length === 0 ? (
+              <p className="text-gray-500 text-sm">
+                Ainda não há marcos suficientes para montar a linha do tempo.
+              </p>
+            ) : (
+              <div className="relative rounded-2xl border border-gray-100 bg-gradient-to-b from-white to-indigo-50/30 p-6">
+                <div className="absolute left-10 right-10 top-1/2 -translate-y-1/2 h-2 rounded-full bg-gray-200" />
+                <div
+                  className="absolute left-10 top-1/2 -translate-y-1/2 h-2 rounded-full bg-gradient-to-r from-violet-500 via-sky-500 to-rose-500 transition-all duration-700"
+                  style={{ width: `calc((100% - 5rem) * ${historyProgress / 100})` }}
+                />
+
+                <div className="relative h-[360px] sm:h-[420px]">
+                  {historyTimelineNodes.map((item, index) => {
+                    const isSelected = selectedHistoryId === item.id;
+                    const isFinal = index === historyTimelineNodes.length - 1;
+                    const currentIndex = Math.max(0, selectedHistoryIndex);
+                    const isRevealed =
+                      index === currentIndex || index === currentIndex - 1;
+                    const leftPct =
+                      historyTimelineNodes.length === 1
+                        ? 50
+                        : (index / (historyTimelineNodes.length - 1)) * 100;
+                    const onTop = index % 2 === 0;
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="absolute -translate-x-1/2"
+                        style={{ left: `${leftPct}%`, top: onTop ? '18%' : '78%' }}
+                      >
+                        <div
+                          className={`absolute left-1/2 -translate-x-1/2 ${onTop ? '-top-32 sm:-top-40' : 'top-8 sm:top-10'} w-44 sm:w-56 rounded-xl border border-gray-200 bg-white shadow-xl p-3 z-20 transition-all duration-300 ${
+                            isRevealed
+                              ? 'opacity-100 translate-y-0'
+                              : 'opacity-0 pointer-events-none translate-y-1'
+                          } group-hover:opacity-100 group-hover:pointer-events-auto group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0`}
+                        >
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                            Dia {item.dayNumber}
+                          </p>
+                          <p className="text-sm font-semibold text-gray-900 mt-1">
+                            {isFinal ? 'Data do evento' : item.title}
+                          </p>
+                          <p className="text-xs text-gray-600 mt-1">{item.detail}</p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedHistoryId(item.id)}
+                          className={`relative w-5 h-5 rounded-full border-2 border-white shadow-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-300 ${
+                            isFinal ? 'bg-rose-500' : getMilestoneColor(item.kind)
+                          } ${isSelected ? 'scale-125 ring-4 ring-indigo-100' : 'hover:scale-110'}`}
+                          aria-label={`${item.title} - dia ${item.dayNumber}`}
+                        />
+                        <span
+                          className={`absolute top-1/2 -translate-y-1/2 text-[11px] font-semibold text-gray-600 whitespace-nowrap ${
+                            isFinal ? '-left-10 sm:-left-12' : 'left-6'
+                          }`}
+                        >
+                          Dia {item.dayNumber}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'overview' && (
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
             {/* Gráfico de despesas */}
@@ -2655,13 +3005,13 @@ export function EventDetailsPage() {
 
                 {pendingTasks.length === 0 && (
                   <p className="text-gray-600 text-center py-10">
-                    Nenhuma tarefa pendente! ðŸŽ‰
+                    Nenhuma tarefa pendente!
                   </p>
                 )}
               </div>
 
               <button
-                onClick={() => setActiveTab('tasks')}
+                onClick={() => switchTab('tasks')}
                 className="w-full mt-4 px-4 py-2 rounded-lg bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Ver checklist completo
@@ -2774,13 +3124,7 @@ export function EventDetailsPage() {
                   {vendorChecklist.map((item) => (
                     <div
                       key={item.id}
-                      className={`flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 rounded-lg border ${
-                        item.doneOverdue
-                          ? 'border-red-200 bg-red-50'
-                          : item.arrivalOverdue
-                            ? 'border-amber-200 bg-amber-50'
-                            : 'border-gray-100 bg-gray-50'
-                      }`}
+                      className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 rounded-lg border border-gray-100 bg-gray-50"
                     >
                       <div>
                         <p className="font-semibold text-gray-800">
@@ -2791,25 +3135,6 @@ export function EventDetailsPage() {
                           {' '}| Finalização: {item.expectedDone ? item.expectedDone.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--'}
                         </p>
                       </div>
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          item.status === 'done'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : item.status === 'arrived'
-                              ? 'bg-blue-100 text-blue-700'
-                              : item.status === 'en_route'
-                                ? 'bg-indigo-100 text-indigo-700'
-                                : 'bg-gray-100 text-gray-600'
-                        }`}
-                      >
-                        {item.status === 'done'
-                          ? 'Finalizado'
-                          : item.status === 'arrived'
-                            ? 'Chegou'
-                            : item.status === 'en_route'
-                              ? 'A caminho'
-                              : 'Aguardando'}
-                      </span>
                     </div>
                   ))}
                 </div>
@@ -2820,10 +3145,10 @@ export function EventDetailsPage() {
               <div className="flex items-start justify-between gap-4 mb-4">
                 <div>
                   <h3 className="text-lg font-bold text-gray-800">
-                    Linha do tempo inteligente
+                    Cronograma do dia inteligente
                   </h3>
                   <p className="text-xs text-gray-500 mt-1">
-                    Camada híbrida: regras locais + endpoint de IA (quando configurado).
+                    Sugestões focadas apenas na operação do dia do evento.
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-2">
@@ -2838,7 +3163,7 @@ export function EventDetailsPage() {
                   >
                     {loadingAiTimelineSuggestions
                       ? 'Gerando...'
-                      : 'Gerar sugestões IA'}
+                      : 'Gerar sugestões IA do dia'}
                   </button>
                 </div>
               </div>

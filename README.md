@@ -15,6 +15,7 @@ Centralizar tarefas, convidados, mesas, orÃ§amento e informaÃ§Ãµes do even
 - `/` Landing [cite:24]
 - `/login` Login/Cadastro [cite:24]
 - `/dashboard` (protegida) [cite:24]
+- `/dashboard/saude` dashboard interno de saude operacional
 - `/dashboard/eventos` lista de eventos [cite:24]
 - `/dashboard/eventos/:id` detalhes do evento [cite:24]
 

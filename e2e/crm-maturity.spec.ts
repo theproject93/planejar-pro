@@ -22,6 +22,12 @@ test.describe('CRM maturity smoke', () => {
     await expect(page.getByRole('heading', { name: 'Acessar Conta' })).toBeVisible();
   });
 
+  test('redirects anonymous user from operational health to login', async ({ page }) => {
+    await page.goto('/dashboard/saude');
+    await page.waitForURL(/\/login/);
+    await expect(page.getByRole('heading', { name: 'Acessar Conta' })).toBeVisible();
+  });
+
   test('renders mature CRM modules for authenticated user', async ({ page }) => {
     test.skip(!hasE2ECredentials(), 'Set E2E_EMAIL and E2E_PASSWORD to run authenticated tests.');
 
@@ -110,5 +116,16 @@ test.describe('CRM maturity smoke', () => {
     await expect(page.getByPlaceholder('Seu WhatsApp')).toHaveValue(officialWhatsapp);
     await expect(page.getByPlaceholder('Seu e-mail')).toHaveValue(officialEmail);
     await expect(page.getByPlaceholder('Seu Instagram')).toHaveValue(officialInstagram);
+  });
+
+  test('loads operational health dashboard for authenticated user', async ({ page }) => {
+    test.skip(!hasE2ECredentials(), 'Set E2E_EMAIL and E2E_PASSWORD to run authenticated tests.');
+
+    await loginViaUI(page);
+    await page.goto('/dashboard/saude');
+    await expect(page.getByRole('heading', { name: 'Saude Operacional' })).toBeVisible();
+    await expect(page.getByText('Top 5 erros por tela')).toBeVisible();
+    await expect(page.getByText('Falhas RPC por acao')).toBeVisible();
+    await expect(page.getByText('Page views principais')).toBeVisible();
   });
 });

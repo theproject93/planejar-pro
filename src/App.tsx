@@ -79,6 +79,11 @@ const FinanceiroPage = lazy(() =>
     default: mod.FinanceiroPage,
   }))
 );
+const OperationalHealthPage = lazy(() =>
+  import('./pages/OperationalHealthPage').then((mod) => ({
+    default: mod.OperationalHealthPage,
+  }))
+);
 const ClientsPage = lazy(() =>
   import('./pages/ClientsPage').then((mod) => ({
     default: mod.ClientsPage,
@@ -784,6 +789,7 @@ function App() {
               <Route path="eventos/:id" element={<EventDetailsPage />} />
               <Route path="eventos/:id/torre" element={<EventCommandCenterPage />} />
               <Route path="perfil" element={<ProfilePage />} />
+              <Route path="saude" element={<OperationalHealthPage />} />
               <Route
                 path="clientes"
                 element={<ClientsPage />}

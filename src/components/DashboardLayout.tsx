@@ -2,6 +2,7 @@
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
+  Activity,
   Bell,
   Calendar,
   CalendarDays,
@@ -44,6 +45,7 @@ export function DashboardLayout() {
 
   const menuItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Visão Geral' },
+    { path: '/dashboard/saude', icon: Activity, label: 'Saude Operacional' },
     { path: '/dashboard/eventos', icon: CalendarDays, label: 'Meus Eventos' },
     { path: '/dashboard/clientes', icon: Users, label: 'Meus Clientes' },
     { path: '/dashboard/financeiro', icon: DollarSign, label: 'Minha Finança' },

@@ -53,6 +53,9 @@ Centralizar tarefas, convidados, mesas, orçamento e informações do evento em 
   - `scripts/sanity-check.ps1`
   - Execucao completa: `.\scripts\sanity-check.ps1`
   - Sem E2E: `.\scripts\sanity-check.ps1 -SkipE2E`
+- Auditoria local de hardening (RLS/indices/RPCs criticos):
+  - `scripts/hardening-audit.ps1`
+  - Execucao: `.\scripts\hardening-audit.ps1`
 
 ## CI (GitHub Actions)
 - Workflow: `.github/workflows/ci.yml`

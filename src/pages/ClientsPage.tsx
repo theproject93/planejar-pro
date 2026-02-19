@@ -3,6 +3,8 @@ import { jsPDF } from 'jspdf';
 import { Bot, Loader2, Plus, Save, Search, Send, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { trackRpcFailure } from '../lib/observability';
 
 type Stage =
   | 'conhecendo_cliente'
@@ -273,6 +275,7 @@ function toPdf(title: string, content: string) {
 
 export function ClientsPage() {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [clients, setClients] = useState<CRMClient[]>([]);
@@ -293,6 +296,7 @@ export function ClientsPage() {
   const [generatingPlaybook, setGeneratingPlaybook] = useState(false);
   const [priorityWeights, setPriorityWeights] = useState<PriorityWeight[]>([]);
   const [savingPriorityWeights, setSavingPriorityWeights] = useState(false);
+  const [purgingLostClients, setPurgingLostClients] = useState(false);
   const [contractDataByClient, setContractDataByClient] = useState<
     Record<string, ContractData>
   >({});
@@ -1011,7 +1015,8 @@ export function ClientsPage() {
       .maybeSingle();
 
     if (error || !data) {
-      alert('Nao foi possivel registrar o consentimento agora.');
+      trackRpcFailure('clients', 'registerConsentRecord', error);
+      showToast('error', 'Nao foi possivel registrar o consentimento agora.');
       return;
     }
 
@@ -1028,7 +1033,8 @@ export function ClientsPage() {
       p_client_id: selected.id,
     });
     if (error || !data) {
-      alert('Nao foi possivel exportar os dados deste cliente.');
+      trackRpcFailure('clients', 'exportClientData', error);
+      showToast('error', 'Nao foi possivel exportar os dados deste cliente.');
       return;
     }
 
@@ -1059,7 +1065,8 @@ export function ClientsPage() {
       p_reason: note,
     });
     if (error || !data) {
-      alert('Nao foi possivel anonimizar os dados deste cliente.');
+      trackRpcFailure('clients', 'anonymizeClientData', error);
+      showToast('error', 'Nao foi possivel anonimizar os dados deste cliente.');
       return;
     }
 
@@ -1219,7 +1226,8 @@ export function ClientsPage() {
     });
     if (error) {
       setGeneratingPlaybook(false);
-      alert('Nao foi possivel gerar tarefas do playbook agora.');
+      trackRpcFailure('clients', 'generatePlaybookTasks', error);
+      showToast('error', 'Nao foi possivel gerar tarefas do playbook agora.');
       return;
     }
     setGeneratingPlaybook(false);
@@ -1251,7 +1259,8 @@ export function ClientsPage() {
       .upsert(payload, { onConflict: 'user_id,weight_key' });
     setSavingPriorityWeights(false);
     if (error) {
-      alert('Nao foi possivel salvar os pesos agora.');
+      trackRpcFailure('clients', 'savePriorityWeights', error);
+      showToast('error', 'Nao foi possivel salvar os pesos agora.');
       return;
     }
     await reload();
@@ -1470,6 +1479,7 @@ export function ClientsPage() {
       });
     if (uploadError) {
       console.error('Erro no upload do portfolio', uploadError);
+      trackRpcFailure('clients', 'uploadPortfolioAndGetLink', uploadError);
       return null;
     }
 
@@ -1495,6 +1505,7 @@ export function ClientsPage() {
 
     if (error || !data?.token) {
       console.error('Erro ao criar share de portfolio', error);
+      trackRpcFailure('clients', 'createPortfolioShareLink', error);
       return null;
     }
 
@@ -1506,7 +1517,7 @@ export function ClientsPage() {
     const hasPdf = Boolean(portfolioPdfFile);
 
     if (!hasPdf) {
-      alert('Selecione um PDF de portfolio antes de gerar o texto.');
+      showToast('error', 'Selecione um PDF de portfolio antes de gerar o texto.');
       return;
     }
 
@@ -1514,20 +1525,42 @@ export function ClientsPage() {
     const portfolioLink = await uploadPortfolioAndGetLink();
     if (!portfolioLink) {
       setSendingPortfolio(false);
-      alert('Nao foi possivel subir o PDF agora. Tente novamente.');
+      showToast('error', 'Nao foi possivel subir o PDF agora. Tente novamente.');
       return;
     }
 
     const publicShareLink = await createPortfolioShareLink(portfolioLink);
     setSendingPortfolio(false);
     if (!publicShareLink) {
-      alert('Nao foi possivel gerar o link publico do portfolio.');
+      showToast('error', 'Nao foi possivel gerar o link publico do portfolio.');
       return;
     }
 
     const finalMessage = `${message}\n\nLink do portfolio: ${publicShareLink}`;
     await navigator.clipboard.writeText(finalMessage);
-    alert('Texto copiado com sucesso. Cole no WhatsApp, Instagram ou onde preferir.');
+    showToast('success', 'Texto copiado. Cole no WhatsApp, Instagram ou onde preferir.');
+  }
+
+  async function purgeLostClientsRetention(days = 30) {
+    if (!user?.id) return;
+    const ok = window.confirm(
+      `Remover definitivamente clientes perdidos com mais de ${days} dias?`
+    );
+    if (!ok) return;
+    setPurgingLostClients(true);
+    const { data, error } = await supabase.rpc('purge_crm_lost_clients', {
+      p_days: days,
+      p_user_id: user.id,
+    });
+    setPurgingLostClients(false);
+    if (error) {
+      trackRpcFailure('clients', 'purgeLostClientsRetention', error);
+      showToast('error', 'Nao foi possivel executar a limpeza de retencao.');
+      return;
+    }
+    const removed = Number(data ?? 0);
+    showToast('success', `${removed} cliente(s) perdido(s) removido(s) com sucesso.`);
+    await reload();
   }
   if (loading) {
     return (
@@ -1649,7 +1682,16 @@ export function ClientsPage() {
       <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-900">Saude operacional (Fase 4)</h2>
-          <span className="text-xs text-gray-500">Risco do funil em tempo real</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">Risco do funil em tempo real</span>
+            <button
+              onClick={() => void purgeLostClientsRetention(30)}
+              disabled={purgingLostClients}
+              className="h-8 px-2 rounded border border-rose-200 text-rose-700 text-xs font-semibold disabled:opacity-60"
+            >
+              {purgingLostClients ? 'Limpando...' : 'Limpar perdidos 30d'}
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
           {operationalMetrics.map((metric) => (

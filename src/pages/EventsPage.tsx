@@ -11,7 +11,9 @@ import {
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient'; // Importe seu client
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { buildDefaultEventTasksPayload } from '../lib/defaultEventTasks';
+import { trackRpcFailure } from '../lib/observability';
 
 interface Event {
   id: string;
@@ -47,6 +49,7 @@ function getEventCoverImage(eventType?: string) {
 
 export function EventsPage() {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
@@ -116,7 +119,8 @@ export function EventsPage() {
       .select('id, name, event_date, location, status, event_type');
 
     if (error) {
-      alert('Erro ao criar evento: ' + error.message);
+      trackRpcFailure('events', 'handleCreateEvent', error);
+      showToast('error', `Erro ao criar evento: ${error.message}`);
     } else {
       const createdEvent = data?.[0];
       if (createdEvent?.id) {
@@ -216,6 +220,7 @@ export function EventsPage() {
       await fetchEvents();
       setDeleteCandidate(null);
     } catch (error: any) {
+      trackRpcFailure('events', 'handleDeleteEvent', error);
       setDeleteErrorMsg(
         `Erro ao excluir evento: ${error?.message ?? 'erro desconhecido'}`
       );

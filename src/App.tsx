@@ -1,4 +1,4 @@
-﻿import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+﻿import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
   Suspense,
   lazy,
@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { supabase } from './lib/supabaseClient';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { setupGlobalObservability, trackPageView } from './lib/observability';
 
 const LandingPage = lazy(() =>
   import('./pages/LandingPage').then((mod) => ({ default: mod.LandingPage }))
@@ -731,6 +732,20 @@ function DashboardHome() {
 }
 
 function App() {
+  function ObservabilityBootstrap() {
+    const location = useLocation();
+
+    useEffect(() => {
+      setupGlobalObservability();
+    }, []);
+
+    useEffect(() => {
+      trackPageView(location.pathname + location.search);
+    }, [location.pathname, location.search]);
+
+    return null;
+  }
+
   return (
     <BrowserRouter>
       <AuthProvider>
@@ -741,6 +756,7 @@ function App() {
             </div>
           }
         >
+          <ObservabilityBootstrap />
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
@@ -795,3 +811,4 @@ function App() {
 }
 
 export default App;
+

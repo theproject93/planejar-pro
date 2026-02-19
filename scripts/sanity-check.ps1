@@ -14,7 +14,8 @@ $requiredMigrations = @(
   "supabase/migrations/20260219193000_crm_maturity_phase5.sql",
   "supabase/migrations/20260219195000_crm_maturity_phase6.sql",
   "supabase/migrations/20260219200000_crm_maturity_phase6_tuning.sql",
-  "supabase/migrations/20260219203000_crm_priority_weights_user_config.sql"
+  "supabase/migrations/20260219203000_crm_priority_weights_user_config.sql",
+  "supabase/migrations/20260219210000_crm_retention_policy.sql"
 )
 
 foreach ($file in $requiredMigrations) {
@@ -24,6 +25,8 @@ foreach ($file in $requiredMigrations) {
 }
 
 Write-Host "[sanity] Migrations obrigatorias: OK"
+
+.\scripts\hardening-audit.ps1
 
 npm run lint
 npm run build
@@ -36,4 +39,3 @@ else {
 }
 
 Write-Host "[sanity] Verificacoes concluidas com sucesso."
-

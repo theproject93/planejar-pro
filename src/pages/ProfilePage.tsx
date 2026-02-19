@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Save, User, Lock, Mail } from 'lucide-react';
+import { useToast } from '../contexts/ToastContext';
 
 export function ProfilePage() {
   const { user } = useAuth();
+  const { showToast } = useToast();
 
   // Estados para o formulário
   // Correção 1: Acessar name via user_metadata
@@ -21,7 +23,7 @@ export function ProfilePage() {
 
     // Simulação de salvamento
     if (password && password !== confirmPassword) {
-      alert('As senhas não conferem!');
+      showToast('error', 'As senhas nao conferem.');
       return;
     }
 
@@ -29,6 +31,7 @@ export function ProfilePage() {
     console.log('Salvando perfil...', { name, email, password });
 
     setSuccessMessage('Perfil atualizado com sucesso!');
+    showToast('success', 'Perfil atualizado com sucesso.');
     setTimeout(() => setSuccessMessage(''), 3000);
   };
 

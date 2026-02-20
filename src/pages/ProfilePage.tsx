@@ -1,8 +1,24 @@
-﻿import { useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { Save, User, Lock, Mail, Phone, Instagram } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { supabase } from '../lib/supabaseClient';
+
+type BillingSubscription = {
+  status: string | null;
+  plan_id: string | null;
+  amount_cents: number | null;
+  last_payment_status: string | null;
+  updated_at: string | null;
+};
+
+const BILLING_OPTIONS = [
+  { id: 'test_1', label: 'Teste PIX/cartao R$ 1', amountLabel: 'R$ 1,00' },
+  { id: 'test_2', label: 'Teste PIX/cartao R$ 2', amountLabel: 'R$ 2,00' },
+  { id: 'essencial', label: 'Plano Essencial', amountLabel: 'R$ 39,00' },
+  { id: 'profissional', label: 'Plano Profissional', amountLabel: 'R$ 59,00' },
+  { id: 'elite', label: 'Plano Elite', amountLabel: 'R$ 89,00' },
+] as const;
 
 export function ProfilePage() {
   const { user } = useAuth();
@@ -28,6 +44,8 @@ export function ProfilePage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [saving, setSaving] = useState(false);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [billingSub, setBillingSub] = useState<BillingSubscription | null>(null);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,6 +88,50 @@ export function ProfilePage() {
     setConfirmPassword('');
     setTimeout(() => setSuccessMessage(''), 3000);
   };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadBilling() {
+      if (!user?.id) return;
+      const { data } = await supabase
+        .from('billing_subscriptions')
+        .select('status, plan_id, amount_cents, last_payment_status, updated_at')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (!cancelled) {
+        setBillingSub((data as BillingSubscription | null) ?? null);
+      }
+    }
+
+    void loadBilling();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  async function openBillingCheckout(planId: string) {
+    setBillingLoading(true);
+    const { data, error } = await supabase.functions.invoke('billing-create-checkout', {
+      body: { planId },
+    });
+    setBillingLoading(false);
+
+    if (error) {
+      showToast('error', `Falha ao iniciar checkout: ${error.message}`);
+      return;
+    }
+
+    const checkoutUrl = (data as { checkoutUrl?: string | null })?.checkoutUrl;
+    if (!checkoutUrl) {
+      showToast('error', 'Checkout nao retornou URL valida.');
+      return;
+    }
+
+    window.location.href = checkoutUrl;
+  }
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -211,6 +273,41 @@ export function ProfilePage() {
               </button>
             </div>
           </form>
+
+          <div className="mt-8 border-t border-gray-100 pt-6">
+            <h3 className="text-lg font-semibold text-gray-900">Assinatura (Mercado Pago)</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Teste com valores baixos e valide liberacao automatica por webhook.
+            </p>
+
+            <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+              <p>
+                Status atual: <span className="font-semibold">{billingSub?.status ?? 'sem_assinatura'}</span>
+              </p>
+              <p>
+                Plano atual: <span className="font-semibold">{billingSub?.plan_id ?? '-'}</span>
+              </p>
+              <p>
+                Ultimo pagamento: <span className="font-semibold">{billingSub?.last_payment_status ?? '-'}</span>
+              </p>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+              {BILLING_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  disabled={billingLoading}
+                  onClick={() => void openBillingCheckout(option.id)}
+                  className="h-11 rounded-xl border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-100 disabled:opacity-60"
+                >
+                  {billingLoading
+                    ? 'Abrindo checkout...'
+                    : `${option.label} (${option.amountLabel})`}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

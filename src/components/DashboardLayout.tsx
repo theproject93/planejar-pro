@@ -320,17 +320,16 @@ export function DashboardLayout() {
               </div>
             </Link>
 
-            <button
-              onClick={signOut}
-              className={`
-                hidden md:inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-red-600 hover:bg-red-50 hover:border-red-100 transition-colors
-                ${isSidebarCollapsed ? 'w-9 h-9' : 'h-9 px-3 text-xs font-semibold'}
-              `}
-              title="Sair do Sistema"
-            >
-              <LogOut size={14} className={isSidebarCollapsed ? '' : 'mr-1.5'} />
-              {!isSidebarCollapsed && 'Sair'}
-            </button>
+            {!isSidebarCollapsed && (
+              <button
+                onClick={signOut}
+                className="hidden md:inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-red-600 hover:bg-red-50 hover:border-red-100 transition-colors h-9 px-3 text-xs font-semibold"
+                title="Sair do Sistema"
+              >
+                <LogOut size={14} className="mr-1.5" />
+                Sair
+              </button>
+            )}
 
             <button
               onClick={closeMobileSidebar}

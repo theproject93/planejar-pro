@@ -108,12 +108,26 @@ HÃ¡ um `public/_redirects` para suporte a rotas SPA em hosts como Netlify. [ci
   - `supabase/migrations/20260217230200_subscription_leads.sql`
 - Edge function de telemetria:
   - `supabase/functions/telemetry-intake/index.ts`
+ - Billing Mercado Pago:
+   - `supabase/functions/billing-create-checkout/index.ts`
+   - `supabase/functions/billing-webhook/index.ts`
+   - `supabase/migrations/20260220181000_billing_mercadopago.sql`
 
 ### Deploy da Edge Function
 1) Defina seu token:
    - PowerShell: `$env:SUPABASE_ACCESS_TOKEN="<seu_token>"`
 2) Deploy:
    - `npx supabase functions deploy telemetry-intake --project-ref kcjpperavjuronkneezm`
+
+### Billing Mercado Pago (setup)
+1) Defina secrets no projeto Supabase:
+   - `MERCADO_PAGO_ACCESS_TOKEN`
+   - `APP_BASE_URL` (ex.: `https://planejar-pro.pages.dev`)
+2) Deploy das funcoes:
+   - `npx supabase functions deploy billing-create-checkout --project-ref kcjpperavjuronkneezm`
+   - `npx supabase functions deploy billing-webhook --project-ref kcjpperavjuronkneezm --no-verify-jwt`
+3) Configure webhook no Mercado Pago:
+   - URL: `https://kcjpperavjuronkneezm.supabase.co/functions/v1/billing-webhook`
 
 ### Validacao rapida (telemetry-intake)
 - Requisicao valida deve retornar `200`.

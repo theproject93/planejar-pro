@@ -155,16 +155,48 @@ export function SignupPage() {
                   type="button"
                   onClick={() => void handleOAuth('google')}
                   disabled={oauthLoading !== null}
-                  className="h-11 rounded-xl border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-100 disabled:opacity-60"
+                  className="h-11 rounded-xl border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-100 disabled:opacity-60 inline-flex items-center justify-center gap-2"
                 >
+                  {oauthLoading === 'google' ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="w-4 h-4">
+                      <path
+                        fill="#EA4335"
+                        d="M12 10.2v3.9h5.4c-.2 1.3-1.5 3.9-5.4 3.9-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.4 14.6 2.5 12 2.5 6.8 2.5 2.6 6.7 2.6 12s4.2 9.5 9.4 9.5c5.4 0 9-3.8 9-9.2 0-.6-.1-1.1-.2-1.6H12z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M3.7 7.6l3.2 2.3c.9-1.8 2.8-3.1 5.1-3.1 1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.4 14.6 2.5 12 2.5c-3.6 0-6.8 2-8.3 5.1z"
+                      />
+                      <path
+                        fill="#4A90E2"
+                        d="M12 21.5c2.5 0 4.7-.8 6.3-2.3l-3-2.4c-.8.5-1.9.9-3.3.9-2.5 0-4.5-1.6-5.3-3.9l-3.3 2.5c1.6 3.1 4.8 5.2 8.6 5.2z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M6.7 13.8c-.2-.5-.3-1.1-.3-1.8s.1-1.2.3-1.8L3.4 7.7C2.8 9 2.5 10.5 2.5 12s.3 3 .9 4.3l3.3-2.5z"
+                      />
+                    </svg>
+                  )}
                   {oauthLoading === 'google' ? 'Conectando...' : 'Continuar com Google'}
                 </button>
                 <button
                   type="button"
                   onClick={() => void handleOAuth('azure')}
                   disabled={oauthLoading !== null}
-                  className="h-11 rounded-xl border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-100 disabled:opacity-60"
+                  className="h-11 rounded-xl border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-100 disabled:opacity-60 inline-flex items-center justify-center gap-2"
                 >
+                  {oauthLoading === 'azure' ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="w-4 h-4">
+                      <path fill="#F35325" d="M2 2h9v9H2z" />
+                      <path fill="#81BC06" d="M13 2h9v9h-9z" />
+                      <path fill="#05A6F0" d="M2 13h9v9H2z" />
+                      <path fill="#FFBA08" d="M13 13h9v9h-9z" />
+                    </svg>
+                  )}
                   {oauthLoading === 'azure' ? 'Conectando...' : 'Continuar com Microsoft'}
                 </button>
               </div>

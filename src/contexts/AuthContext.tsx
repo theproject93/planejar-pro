@@ -67,10 +67,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithProvider = async (provider: 'google' | 'azure') => {
+    const scopes = provider === 'azure' ? 'email' : undefined;
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
+        scopes,
       },
     });
 

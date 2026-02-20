@@ -118,6 +118,10 @@ Deno.serve(async (request) => {
         plan_id: plan.id,
         plan_amount_cents: plan.amountCents,
       },
+      payment_methods: {
+        // Avoid forcing Mercado Pago wallet login as the primary option.
+        excluded_payment_methods: [{ id: 'account_money' }],
+      },
     };
 
     const checkoutResponse = await fetch(

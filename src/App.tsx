@@ -31,6 +31,11 @@ const LoginPage = lazy(() =>
 const SignupPage = lazy(() =>
   import('./pages/SignupPage').then((mod) => ({ default: mod.SignupPage }))
 );
+const AuthCallbackPage = lazy(() =>
+  import('./pages/AuthCallbackPage').then((mod) => ({
+    default: mod.AuthCallbackPage,
+  }))
+);
 const PrivacyPolicyPage = lazy(() =>
   import('./pages/PrivacyPolicyPage').then((mod) => ({
     default: mod.PrivacyPolicyPage,
@@ -769,6 +774,7 @@ function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/cadastro" element={<SignupPage />} />
+            <Route path="/auth/callback" element={<AuthCallbackPage />} />
             <Route path="/atendimento-ia" element={<AtendimentoIAPage />} />
             <Route path="/torre/:token" element={<VendorCommandCenterPage />} />
             <Route path="/noivos/:token" element={<CouplePortalPage />} />

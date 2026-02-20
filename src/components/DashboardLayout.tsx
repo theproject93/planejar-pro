@@ -36,6 +36,7 @@ export function DashboardLayout() {
   const { user, signOut } = useAuth();
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isTrialBannerDismissedToday, setIsTrialBannerDismissedToday] = useState(false);
 
   // Desktop: inicia recolhido (icones). Expande ao passar o mouse.
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
@@ -149,6 +150,51 @@ export function DashboardLayout() {
 
     return [...ordered, ...remaining];
   }, [eventModuleItems, eventModuleOrder]);
+
+  const trialBannerData = useMemo(() => {
+    if (!user?.created_at) return null;
+
+    const rawTrialDays = user.user_metadata?.trial_days;
+    const trialDays =
+      typeof rawTrialDays === 'number' && Number.isFinite(rawTrialDays) && rawTrialDays > 0
+        ? Math.floor(rawTrialDays)
+        : 30;
+    if (trialDays <= 0) return null;
+
+    const createdAt = new Date(user.created_at);
+    if (Number.isNaN(createdAt.getTime())) return null;
+
+    const expiration = new Date(createdAt);
+    expiration.setDate(expiration.getDate() + trialDays);
+
+    const now = new Date();
+    const msLeft = expiration.getTime() - now.getTime();
+    const daysLeft = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
+    if (daysLeft <= 0) return null;
+
+    return { daysLeft };
+  }, [user]);
+
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) {
+      setIsTrialBannerDismissedToday(false);
+      return;
+    }
+
+    const storageKey = `trial_banner_dismissed_date:${userId}`;
+    const today = new Intl.DateTimeFormat('sv-SE').format(new Date());
+    const dismissedDate = window.localStorage.getItem(storageKey);
+    setIsTrialBannerDismissedToday(dismissedDate === today);
+  }, [user?.id]);
+
+  function dismissTrialBannerForToday() {
+    if (!user?.id) return;
+    const storageKey = `trial_banner_dismissed_date:${user.id}`;
+    const today = new Intl.DateTimeFormat('sv-SE').format(new Date());
+    window.localStorage.setItem(storageKey, today);
+    setIsTrialBannerDismissedToday(true);
+  }
   useEffect(() => {
     const userId = user?.id;
     if (!userId) {
@@ -505,6 +551,32 @@ export function DashboardLayout() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8">
+          {trialBannerData && !isTrialBannerDismissedToday && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm text-amber-900">
+                  Faltam <span className="font-bold">{trialBannerData.daysLeft} dias</span> para o
+                  teste acabar. Garanta a continuidade do seu planejamento{' '}
+                  <Link
+                    to="/atendimento-ia?origem=trial-banner"
+                    className="font-semibold underline hover:text-amber-700"
+                  >
+                    aqui
+                  </Link>
+                  .
+                </p>
+                <button
+                  type="button"
+                  onClick={dismissTrialBannerForToday}
+                  className="text-amber-700 hover:text-amber-900"
+                  aria-label="Fechar aviso de teste"
+                  title="Fechar por hoje"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

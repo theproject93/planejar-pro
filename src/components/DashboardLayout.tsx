@@ -293,12 +293,12 @@ export function DashboardLayout() {
         `}
       >
         <div className="h-full flex flex-col">
-          <div className="h-16 flex items-center px-6 border-b border-gray-100">
+          <div className="h-16 flex items-center px-4 border-b border-gray-100 gap-2">
             <Link
               to="/dashboard/perfil"
               onClick={closeMobileSidebar}
               className={`
-                flex items-center min-w-0 rounded-xl transition-all duration-200
+                flex-1 flex items-center min-w-0 rounded-xl transition-all duration-200
                 hover:bg-gray-50
                 ${isSidebarCollapsed ? 'md:justify-center md:w-full md:px-0' : 'md:px-2 md:py-1.5'}
               `}
@@ -319,6 +319,18 @@ export function DashboardLayout() {
                 <p className="text-xs text-gray-500 truncate">Gerenciar perfil</p>
               </div>
             </Link>
+
+            <button
+              onClick={signOut}
+              className={`
+                hidden md:inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-red-600 hover:bg-red-50 hover:border-red-100 transition-colors
+                ${isSidebarCollapsed ? 'w-9 h-9' : 'h-9 px-3 text-xs font-semibold'}
+              `}
+              title="Sair do Sistema"
+            >
+              <LogOut size={14} className={isSidebarCollapsed ? '' : 'mr-1.5'} />
+              {!isSidebarCollapsed && 'Sair'}
+            </button>
 
             <button
               onClick={closeMobileSidebar}

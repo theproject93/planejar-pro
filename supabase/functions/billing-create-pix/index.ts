@@ -83,6 +83,13 @@ Deno.serve(async (request) => {
     if (!email) {
       return jsonResponse(400, { error: 'missing_user_email' });
     }
+    const testPayerEmail =
+      Deno.env.get('MERCADO_PAGO_TEST_PAYER_EMAIL')?.trim() || null;
+    const isTestToken = mercadoPagoAccessToken.startsWith('TEST-');
+    const generatedTestPayerEmail = `test_user_${user.id.replace(/-/g, '')}@testuser.com`;
+    const payerEmail = isTestToken
+      ? testPayerEmail || generatedTestPayerEmail
+      : email;
 
     const externalReference = `${user.id}:${plan.id}:${Date.now()}`;
     const notificationUrl = `${supabaseUrl}/functions/v1/billing-webhook`;
@@ -91,7 +98,7 @@ Deno.serve(async (request) => {
       transaction_amount: Number((plan.amountCents / 100).toFixed(2)),
       description: plan.title,
       payment_method_id: 'pix',
-      payer: { email },
+      payer: { email: payerEmail },
       notification_url: notificationUrl,
       external_reference: externalReference,
       metadata: {
@@ -117,10 +124,14 @@ Deno.serve(async (request) => {
     if (!paymentResponse.ok) {
       const raw = await paymentResponse.text();
       console.error('mercadopago_pix_error', paymentResponse.status, raw);
+      const providerHint = raw.includes('Unauthorized use of live credentials')
+        ? 'mercadopago_live_credentials_in_test_flow'
+        : null;
       return jsonResponse(400, {
         error: 'mercadopago_pix_failed',
         providerStatus: paymentResponse.status,
         providerBody: raw,
+        providerHint,
       });
     }
 
@@ -164,7 +175,7 @@ Deno.serve(async (request) => {
           payment_type_id: 'bank_transfer',
           amount: Number((plan.amountCents / 100).toFixed(2)),
           currency: 'BRL',
-          payer_email: email,
+          payer_email: payerEmail,
           processed_at: new Date().toISOString(),
           raw_payload: payment,
         },

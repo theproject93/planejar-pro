@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Save, User, Lock, Mail, Phone, Instagram } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { supabase } from '../lib/supabaseClient';
@@ -10,15 +11,6 @@ type BillingSubscription = {
   amount_cents: number | null;
   last_payment_status: string | null;
   updated_at: string | null;
-};
-
-type PixCheckoutData = {
-  paymentId: string;
-  qrCode: string;
-  qrCodeBase64: string;
-  ticketUrl: string | null;
-  amountCents: number;
-  planId: string;
 };
 
 const BILLING_OPTIONS = [
@@ -32,6 +24,7 @@ const BILLING_OPTIONS = [
 export function ProfilePage() {
   const { user } = useAuth();
   const { showToast } = useToast();
+  const location = useLocation();
 
   const userMeta = useMemo(
     () => (user?.user_metadata as Record<string, any> | undefined) ?? {},
@@ -55,7 +48,17 @@ export function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingSub, setBillingSub] = useState<BillingSubscription | null>(null);
-  const [pixCheckout, setPixCheckout] = useState<PixCheckoutData | null>(null);
+  const [billingSyncing, setBillingSyncing] = useState(false);
+
+  const billingPlanLabel = useMemo(() => {
+    if (!billingSub?.plan_id) return '-';
+    return BILLING_OPTIONS.find((option) => option.id === billingSub.plan_id)?.label ?? billingSub.plan_id;
+  }, [billingSub?.plan_id]);
+
+  const cameFromInfinitePay = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('billing_provider') === 'infinitepay';
+  }, [location.search]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,6 +125,39 @@ export function ProfilePage() {
     };
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!cameFromInfinitePay || !user?.id) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    setBillingSyncing(true);
+
+    const timer = window.setInterval(async () => {
+      attempts += 1;
+      const { data } = await supabase
+        .from('billing_subscriptions')
+        .select('status, plan_id, amount_cents, last_payment_status, updated_at')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      const next = (data as BillingSubscription | null) ?? null;
+      setBillingSub(next);
+
+      if (next?.status === 'active' || attempts >= 8) {
+        window.clearInterval(timer);
+        setBillingSyncing(false);
+      }
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      setBillingSyncing(false);
+    };
+  }, [cameFromInfinitePay, user?.id]);
+
   async function openBillingCheckout(planId: string) {
     const { data: currentSession } = await supabase.auth.getSession();
     let session = currentSession.session;
@@ -169,69 +205,6 @@ export function ProfilePage() {
     }
 
     window.location.href = checkoutUrl;
-  }
-
-  async function openPixCheckout(planId: string) {
-    const { data: currentSession } = await supabase.auth.getSession();
-    let session = currentSession.session;
-    if (!session) {
-      const { data: refreshed } = await supabase.auth.refreshSession();
-      session = refreshed.session;
-    }
-    if (!session) {
-      showToast('error', 'Sessao expirada. Faça login novamente.');
-      return;
-    }
-
-    setBillingLoading(true);
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-    const response = await fetch(`${supabaseUrl}/functions/v1/billing-create-pix`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: supabaseAnonKey,
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ planId }),
-    });
-    setBillingLoading(false);
-
-    const data = (await response.json()) as {
-      paymentId?: string;
-      qrCode?: string;
-      qrCodeBase64?: string;
-      ticketUrl?: string | null;
-      amountCents?: number;
-      planId?: string;
-      error?: string;
-      providerBody?: string;
-    };
-
-    if (!response.ok || !data.qrCode || !data.qrCodeBase64 || !data.paymentId) {
-      showToast(
-        'error',
-        `Falha ao gerar PIX: ${data.error ?? 'erro desconhecido'} ${
-          data.providerBody ?? ''
-        }`
-      );
-      return;
-    }
-
-    setPixCheckout({
-      paymentId: data.paymentId,
-      qrCode: data.qrCode,
-      qrCodeBase64: data.qrCodeBase64,
-      ticketUrl: data.ticketUrl ?? null,
-      amountCents: data.amountCents ?? 0,
-      planId: data.planId ?? planId,
-    });
-  }
-
-  async function copyPixCode() {
-    if (!pixCheckout?.qrCode) return;
-    await navigator.clipboard.writeText(pixCheckout.qrCode);
-    showToast('success', 'Codigo PIX copiado.');
   }
 
   return (
@@ -376,17 +349,40 @@ export function ProfilePage() {
           </form>
 
           <div className="mt-8 border-t border-gray-100 pt-6">
-            <h3 className="text-lg font-semibold text-gray-900">Assinatura (Mercado Pago)</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Assinatura (InfinitePay)</h3>
             <p className="mt-1 text-sm text-gray-500">
-              Teste com valores baixos e valide liberacao automatica por webhook.
+              Checkout com PIX e cartao no mesmo fluxo, com liberacao automatica por webhook.
             </p>
+
+            {billingSub?.status === 'active' && (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-800">
+                  Parabens! Sua assinatura esta ativa.
+                </p>
+                <p className="mt-1 text-sm text-emerald-700">
+                  Plano atual: <span className="font-semibold">{billingPlanLabel}</span>
+                </p>
+              </div>
+            )}
+            {cameFromInfinitePay && billingSub?.status !== 'active' && (
+              <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <p className="text-sm font-semibold text-blue-800">
+                  Pagamento recebido, aguardando confirmacao final da assinatura.
+                </p>
+                <p className="mt-1 text-sm text-blue-700">
+                  {billingSyncing
+                    ? 'Sincronizando status automaticamente...'
+                    : 'Atualize a pagina em instantes.'}
+                </p>
+              </div>
+            )}
 
             <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
               <p>
                 Status atual: <span className="font-semibold">{billingSub?.status ?? 'sem_assinatura'}</span>
               </p>
               <p>
-                Plano atual: <span className="font-semibold">{billingSub?.plan_id ?? '-'}</span>
+                Plano atual: <span className="font-semibold">{billingPlanLabel}</span>
               </p>
               <p>
                 Ultimo pagamento: <span className="font-semibold">{billingSub?.last_payment_status ?? '-'}</span>
@@ -399,80 +395,21 @@ export function ProfilePage() {
                   <p className="text-sm font-semibold text-gray-900">
                     {option.label} ({option.amountLabel})
                   </p>
-                  <div className="mt-2 grid grid-cols-1 gap-2">
-                    <button
-                      type="button"
-                      disabled={billingLoading}
-                      onClick={() => void openPixCheckout(option.id)}
-                      className="h-10 rounded-lg border border-emerald-300 bg-emerald-50 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
-                    >
-                      {billingLoading ? 'Gerando PIX...' : 'PIX direto (sem login MP)'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={billingLoading}
-                      onClick={() => void openBillingCheckout(option.id)}
-                      className="h-10 rounded-lg border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-100 disabled:opacity-60"
-                    >
-                      {billingLoading ? 'Abrindo checkout...' : 'Checkout MP / Cartao'}
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    disabled={billingLoading}
+                    onClick={() => void openBillingCheckout(option.id)}
+                    className="mt-2 h-10 w-full rounded-lg border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-100 disabled:opacity-60"
+                  >
+                    {billingLoading ? 'Abrindo checkout...' : 'Checkout InfinitePay (PIX/cartao)'}
+                  </button>
                 </div>
               ))}
             </div>
           </div>
         </div>
       </div>
-      {pixCheckout && (
-        <div className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-5">
-            <h4 className="text-lg font-semibold text-gray-900">PIX gerado</h4>
-            <p className="mt-1 text-sm text-gray-600">
-              Plano: {pixCheckout.planId} | Valor:{' '}
-              {(pixCheckout.amountCents / 100).toLocaleString('pt-BR', {
-                style: 'currency',
-                currency: 'BRL',
-              })}
-            </p>
-            <img
-              src={`data:image/png;base64,${pixCheckout.qrCodeBase64}`}
-              alt="QR Code PIX"
-              className="mx-auto mt-4 h-52 w-52 rounded-lg border border-gray-200"
-            />
-            <textarea
-              value={pixCheckout.qrCode}
-              readOnly
-              className="mt-4 h-24 w-full rounded-lg border border-gray-300 p-2 text-xs"
-            />
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => void copyPixCode()}
-                className="h-10 rounded-lg bg-emerald-600 text-sm font-semibold text-white hover:bg-emerald-500"
-              >
-                Copiar codigo PIX
-              </button>
-              <button
-                type="button"
-                onClick={() => setPixCheckout(null)}
-                className="h-10 rounded-lg border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-100"
-              >
-                Fechar
-              </button>
-            </div>
-            {pixCheckout.ticketUrl && (
-              <a
-                href={pixCheckout.ticketUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-3 inline-flex text-sm font-semibold text-blue-700 underline"
-              >
-                Abrir comprovante no Mercado Pago
-              </a>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
+

@@ -32,6 +32,35 @@ function jsonResponse(status: number, body: Record<string, unknown>) {
   });
 }
 
+function findCheckoutUrl(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed;
+    }
+    return null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const directCandidates = [
+    row.checkout_url,
+    row.payment_url,
+    row.url,
+    row.link,
+    row.invoice_url,
+    row.invoice_link,
+  ];
+  for (const candidate of directCandidates) {
+    const found = findCheckoutUrl(candidate);
+    if (found) return found;
+  }
+  for (const nested of Object.values(row)) {
+    const found = findCheckoutUrl(nested);
+    if (found) return found;
+  }
+  return null;
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -45,14 +74,14 @@ Deno.serve(async (request) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    const mercadoPagoAccessToken = Deno.env.get('MERCADO_PAGO_ACCESS_TOKEN');
+    const infinitePayHandle = Deno.env.get('INFINITEPAY_HANDLE')?.trim();
     const appBaseUrl = Deno.env.get('APP_BASE_URL');
 
     if (
       !supabaseUrl ||
       !supabaseAnonKey ||
       !supabaseServiceRoleKey ||
-      !mercadoPagoAccessToken
+      !infinitePayHandle
     ) {
       return jsonResponse(500, { error: 'server_misconfigured' });
     }
@@ -90,84 +119,77 @@ Deno.serve(async (request) => {
       request.headers.get('origin')?.trim().replace(/\/+$/, '') ??
       'http://localhost:5173';
 
-    const externalReference = `${user.id}:${plan.id}:${Date.now()}`;
-    const notificationUrl = `${supabaseUrl}/functions/v1/billing-webhook`;
-    const unitPrice = Number((plan.amountCents / 100).toFixed(2));
+    const orderNsu = `${user.id}:${plan.id}:${Date.now()}`;
+    const webhookUrl = `${supabaseUrl}/functions/v1/billing-webhook`;
+    const redirectUrl = `${baseUrl}/dashboard/perfil?billing_provider=infinitepay`;
+    const rawName = (user.user_metadata?.name as string | undefined)?.trim();
+    const customerName =
+      rawName && rawName.length > 0 ? rawName : email.split('@')[0];
 
     const checkoutPayload = {
+      handle: infinitePayHandle,
       items: [
         {
-          id: plan.id,
-          title: plan.title,
           quantity: 1,
-          unit_price: unitPrice,
-          currency_id: 'BRL',
+          price: plan.amountCents,
+          description: plan.title,
         },
       ],
-      payer: { email },
-      external_reference: externalReference,
-      notification_url: notificationUrl,
-      back_urls: {
-        success: `${baseUrl}/dashboard/perfil?billing_status=success`,
-        failure: `${baseUrl}/dashboard/perfil?billing_status=failure`,
-        pending: `${baseUrl}/dashboard/perfil?billing_status=pending`,
+      customer: {
+        name: customerName,
+        email,
       },
-      auto_return: 'approved',
-      metadata: {
-        user_id: user.id,
-        plan_id: plan.id,
-        plan_amount_cents: plan.amountCents,
-      },
+      order_nsu: orderNsu,
+      webhook_url: webhookUrl,
+      redirect_url: redirectUrl,
     };
 
     const checkoutResponse = await fetch(
-      'https://api.mercadopago.com/checkout/preferences',
+      'https://api.infinitepay.io/invoices/public/checkout/links',
       {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${mercadoPagoAccessToken}`,
-          'Content-Type': 'application/json',
-          'X-Idempotency-Key': crypto.randomUUID(),
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(checkoutPayload),
       }
     );
 
     if (!checkoutResponse.ok) {
       const raw = await checkoutResponse.text();
-      console.error('mercadopago_checkout_error', checkoutResponse.status, raw);
+      console.error('infinitepay_checkout_error', checkoutResponse.status, raw);
       return jsonResponse(400, {
-        error: 'mercadopago_checkout_failed',
+        error: 'infinitepay_checkout_failed',
         providerStatus: checkoutResponse.status,
         providerBody: raw,
       });
     }
 
-    const preference = (await checkoutResponse.json()) as Record<string, unknown>;
-    const preferenceId =
-      typeof preference.id === 'string' ? preference.id : null;
-    const initPoint =
-      typeof preference.init_point === 'string' ? preference.init_point : null;
-    const sandboxInitPoint =
-      typeof preference.sandbox_init_point === 'string'
-        ? preference.sandbox_init_point
-        : null;
-
-    if (!preferenceId || (!initPoint && !sandboxInitPoint)) {
-      return jsonResponse(502, { error: 'mercadopago_invalid_checkout_payload' });
+    const responseBody = (await checkoutResponse.json()) as Record<string, unknown>;
+    const checkoutUrl = findCheckoutUrl(responseBody);
+    if (!checkoutUrl) {
+      return jsonResponse(502, {
+        error: 'infinitepay_invalid_checkout_payload',
+        providerBody: responseBody,
+      });
     }
+
+    const invoiceSlug =
+      typeof responseBody.invoice_slug === 'string'
+        ? responseBody.invoice_slug
+        : typeof responseBody.slug === 'string'
+          ? responseBody.slug
+          : null;
 
     await serviceClient.from('billing_subscriptions').upsert(
       {
         user_id: user.id,
-        provider: 'mercadopago',
+        provider: 'infinitepay',
         status: 'pending_checkout',
         plan_id: plan.id,
         plan_name: plan.title,
         amount_cents: plan.amountCents,
         currency: 'BRL',
-        external_reference: externalReference,
-        provider_checkout_preference_id: preferenceId,
+        external_reference: orderNsu,
+        provider_checkout_preference_id: invoiceSlug,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' }
@@ -175,10 +197,10 @@ Deno.serve(async (request) => {
 
     return jsonResponse(200, {
       ok: true,
-      preferenceId,
-      initPoint,
-      sandboxInitPoint,
-      checkoutUrl: sandboxInitPoint ?? initPoint,
+      provider: 'infinitepay',
+      checkoutUrl,
+      orderNsu,
+      invoiceSlug,
       planId: plan.id,
       amountCents: plan.amountCents,
     });

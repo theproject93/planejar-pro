@@ -9,6 +9,7 @@ import {
   Camera,
   CheckSquare,
   Clock,
+  CreditCard,
   DollarSign,
   Edit2,
   FileText,
@@ -33,10 +34,11 @@ type EventModuleItem = {
 };
 
 export function DashboardLayout() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, isSuperAdmin } = useAuth();
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isTrialBannerDismissedToday, setIsTrialBannerDismissedToday] = useState(false);
+  const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
 
   // Desktop: inicia recolhido (icones). Expande ao passar o mouse.
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
@@ -50,6 +52,9 @@ export function DashboardLayout() {
     { path: '/dashboard/eventos', icon: CalendarDays, label: 'Meus Eventos' },
     { path: '/dashboard/clientes', icon: Users, label: 'Meus Clientes' },
     { path: '/dashboard/financeiro', icon: DollarSign, label: 'Minha Finança' },
+    ...(isSuperAdmin
+      ? [{ path: '/dashboard/assinaturas', icon: CreditCard, label: 'Assinaturas' }]
+      : []),
     { path: '/dashboard/configuracoes', icon: Settings, label: 'Configurações' },
   ];
 
@@ -195,6 +200,30 @@ export function DashboardLayout() {
     window.localStorage.setItem(storageKey, today);
     setIsTrialBannerDismissedToday(true);
   }
+
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) {
+      setHasActiveSubscription(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('billing_subscriptions')
+        .select('status')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (cancelled) return;
+      setHasActiveSubscription(data?.status === 'active');
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
   useEffect(() => {
     const userId = user?.id;
     if (!userId) {
@@ -555,7 +584,7 @@ export function DashboardLayout() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8">
-          {trialBannerData && !isTrialBannerDismissedToday && (
+          {trialBannerData && !isTrialBannerDismissedToday && !hasActiveSubscription && (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
               <div className="flex items-start justify-between gap-3">
                 <p className="text-sm text-amber-900">

@@ -3,6 +3,7 @@
   useContext,
   useState,
   useEffect,
+  useMemo,
   type ReactNode,
 } from 'react';
 import { type Session, type User } from '@supabase/supabase-js';
@@ -16,6 +17,7 @@ interface AuthContextType {
   signInWithProvider: (provider: 'google' | 'azure') => Promise<void>;
   signOut: () => Promise<void>;
   isAuthenticated: boolean;
+  isSuperAdmin: boolean;
   loading: boolean;
 }
 
@@ -24,7 +26,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  const superAdminEmails = useMemo(
+    () =>
+      ((import.meta.env.VITE_SUPER_ADMIN_EMAILS as string | undefined) ?? '')
+        .split(',')
+        .map((item) => item.trim().toLowerCase())
+        .filter((item) => item.length > 0),
+    []
+  );
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -43,6 +55,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const currentUser = user;
+    if (!currentUser) {
+      setIsSuperAdmin(false);
+      return;
+    }
+
+    const metadata =
+      (currentUser.user_metadata as Record<string, unknown> | undefined) ?? {};
+    const role =
+      typeof metadata.role === 'string'
+        ? metadata.role.toLowerCase().trim()
+        : null;
+    const metadataIsSuper =
+      metadata.is_super_admin === true ||
+      metadata.super_admin === true ||
+      role === 'super_admin';
+    const email = currentUser.email?.toLowerCase().trim() ?? '';
+    const envIsSuper = email.length > 0 && superAdminEmails.includes(email);
+
+    if (metadataIsSuper || envIsSuper) {
+      setIsSuperAdmin(true);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('super_admin_users')
+        .select('user_id')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      if (!cancelled) {
+        setIsSuperAdmin(Boolean(data?.user_id));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, superAdminEmails]);
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -94,6 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signInWithProvider,
         signOut,
         isAuthenticated: !!user,
+        isSuperAdmin,
         loading,
       }}
     >

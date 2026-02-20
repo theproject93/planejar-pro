@@ -54,6 +54,11 @@ const DashboardLayout = lazy(() =>
 const ProfilePage = lazy(() =>
   import('./pages/ProfilePage').then((mod) => ({ default: mod.ProfilePage }))
 );
+const SuperBillingPage = lazy(() =>
+  import('./pages/SuperBillingPage').then((mod) => ({
+    default: mod.SuperBillingPage,
+  }))
+);
 const EventsPage = lazy(() =>
   import('./pages/EventsPage').then((mod) => ({ default: mod.EventsPage }))
 );
@@ -241,6 +246,11 @@ const SHORTCUT_ACTIONS: ShortcutAction[] = [
 function PrivateRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
+}
+
+function SuperAdminRoute({ children }: { children: ReactNode }) {
+  const { isSuperAdmin } = useAuth();
+  return isSuperAdmin ? <>{children}</> : <Navigate to="/dashboard" />;
 }
 
 function DashboardHome() {
@@ -799,6 +809,14 @@ function App() {
               <Route path="eventos/:id" element={<EventDetailsPage />} />
               <Route path="eventos/:id/torre" element={<EventCommandCenterPage />} />
               <Route path="perfil" element={<ProfilePage />} />
+              <Route
+                path="assinaturas"
+                element={
+                  <SuperAdminRoute>
+                    <SuperBillingPage />
+                  </SuperAdminRoute>
+                }
+              />
               <Route path="saude" element={<OperationalHealthPage />} />
               <Route
                 path="clientes"

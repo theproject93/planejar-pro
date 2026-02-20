@@ -118,10 +118,6 @@ Deno.serve(async (request) => {
         plan_id: plan.id,
         plan_amount_cents: plan.amountCents,
       },
-      payment_methods: {
-        // Avoid forcing Mercado Pago wallet login as the primary option.
-        excluded_payment_methods: [{ id: 'account_money' }],
-      },
     };
 
     const checkoutResponse = await fetch(
@@ -140,7 +136,11 @@ Deno.serve(async (request) => {
     if (!checkoutResponse.ok) {
       const raw = await checkoutResponse.text();
       console.error('mercadopago_checkout_error', checkoutResponse.status, raw);
-      return jsonResponse(502, { error: 'mercadopago_checkout_failed' });
+      return jsonResponse(400, {
+        error: 'mercadopago_checkout_failed',
+        providerStatus: checkoutResponse.status,
+        providerBody: raw,
+      });
     }
 
     const preference = (await checkoutResponse.json()) as Record<string, unknown>;

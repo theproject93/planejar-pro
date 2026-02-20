@@ -25,7 +25,10 @@ export async function trackEvent({
   if (!hasCookieConsent()) return;
 
   try {
-    await supabase.functions.invoke('telemetry-intake', {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) return;
+
+    const { error } = await supabase.functions.invoke('telemetry-intake', {
       body: {
         eventName,
         page,
@@ -36,6 +39,10 @@ export async function trackEvent({
         referrer: document.referrer || null,
       },
     });
+
+    if (error) {
+      console.warn('Falha ao registrar telemetria:', error.message);
+    }
   } catch (error) {
     console.warn('Falha ao registrar telemetria:', error);
   }

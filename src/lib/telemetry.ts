@@ -26,9 +26,17 @@ export async function trackEvent({
 
   try {
     const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData.session) return;
+    let session = sessionData.session;
+    if (!session) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      session = refreshed.session;
+    }
+    if (!session) return;
 
     const { error } = await supabase.functions.invoke('telemetry-intake', {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
       body: {
         eventName,
         page,
@@ -41,6 +49,7 @@ export async function trackEvent({
     });
 
     if (error) {
+      if (error.message?.includes('non-2xx status code')) return;
       console.warn('Falha ao registrar telemetria:', error.message);
     }
   } catch (error) {

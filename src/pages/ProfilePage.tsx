@@ -113,8 +113,22 @@ export function ProfilePage() {
   }, [user?.id]);
 
   async function openBillingCheckout(planId: string) {
+    const { data: currentSession } = await supabase.auth.getSession();
+    let session = currentSession.session;
+    if (!session) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      session = refreshed.session;
+    }
+    if (!session) {
+      showToast('error', 'Sessao expirada. Faça login novamente.');
+      return;
+    }
+
     setBillingLoading(true);
     const { data, error } = await supabase.functions.invoke('billing-create-checkout', {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
       body: { planId },
     });
     setBillingLoading(false);

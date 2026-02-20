@@ -22,6 +22,7 @@ export async function trackEvent({
   page,
   metadata = {},
 }: TrackPayload): Promise<void> {
+  if (import.meta.env.DEV) return;
   if (!hasCookieConsent()) return;
 
   try {

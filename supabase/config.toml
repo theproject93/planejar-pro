@@ -389,3 +389,6 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.billing-webhook]
 verify_jwt = false
+
+[functions.billing-create-checkout]
+verify_jwt = false

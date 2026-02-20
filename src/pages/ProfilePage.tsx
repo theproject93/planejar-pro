@@ -125,19 +125,33 @@ export function ProfilePage() {
     }
 
     setBillingLoading(true);
-    const { data, error } = await supabase.functions.invoke('billing-create-checkout', {
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: { planId },
-    });
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+
+    const response = await fetch(
+      `${supabaseUrl}/functions/v1/billing-create-checkout`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ planId }),
+      }
+    );
     setBillingLoading(false);
 
-    if (error) {
-      showToast('error', `Falha ao iniciar checkout: ${error.message}`);
+    if (!response.ok) {
+      const errorBody = await response.text();
+      showToast(
+        'error',
+        `Falha ao iniciar checkout (${response.status}): ${errorBody || 'sem detalhes'}`
+      );
       return;
     }
 
+    const data = (await response.json()) as { checkoutUrl?: string | null };
     const checkoutUrl = (data as { checkoutUrl?: string | null })?.checkoutUrl;
     if (!checkoutUrl) {
       showToast('error', 'Checkout nao retornou URL valida.');

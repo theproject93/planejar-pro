@@ -12,6 +12,15 @@ type BillingSubscription = {
   updated_at: string | null;
 };
 
+type PixCheckoutData = {
+  paymentId: string;
+  qrCode: string;
+  qrCodeBase64: string;
+  ticketUrl: string | null;
+  amountCents: number;
+  planId: string;
+};
+
 const BILLING_OPTIONS = [
   { id: 'test_1', label: 'Teste PIX/cartao R$ 1', amountLabel: 'R$ 1,00' },
   { id: 'test_2', label: 'Teste PIX/cartao R$ 2', amountLabel: 'R$ 2,00' },
@@ -46,6 +55,7 @@ export function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingSub, setBillingSub] = useState<BillingSubscription | null>(null);
+  const [pixCheckout, setPixCheckout] = useState<PixCheckoutData | null>(null);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,6 +169,69 @@ export function ProfilePage() {
     }
 
     window.location.href = checkoutUrl;
+  }
+
+  async function openPixCheckout(planId: string) {
+    const { data: currentSession } = await supabase.auth.getSession();
+    let session = currentSession.session;
+    if (!session) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      session = refreshed.session;
+    }
+    if (!session) {
+      showToast('error', 'Sessao expirada. Faça login novamente.');
+      return;
+    }
+
+    setBillingLoading(true);
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+    const response = await fetch(`${supabaseUrl}/functions/v1/billing-create-pix`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ planId }),
+    });
+    setBillingLoading(false);
+
+    const data = (await response.json()) as {
+      paymentId?: string;
+      qrCode?: string;
+      qrCodeBase64?: string;
+      ticketUrl?: string | null;
+      amountCents?: number;
+      planId?: string;
+      error?: string;
+      providerBody?: string;
+    };
+
+    if (!response.ok || !data.qrCode || !data.qrCodeBase64 || !data.paymentId) {
+      showToast(
+        'error',
+        `Falha ao gerar PIX: ${data.error ?? 'erro desconhecido'} ${
+          data.providerBody ?? ''
+        }`
+      );
+      return;
+    }
+
+    setPixCheckout({
+      paymentId: data.paymentId,
+      qrCode: data.qrCode,
+      qrCodeBase64: data.qrCodeBase64,
+      ticketUrl: data.ticketUrl ?? null,
+      amountCents: data.amountCents ?? 0,
+      planId: data.planId ?? planId,
+    });
+  }
+
+  async function copyPixCode() {
+    if (!pixCheckout?.qrCode) return;
+    await navigator.clipboard.writeText(pixCheckout.qrCode);
+    showToast('success', 'Codigo PIX copiado.');
   }
 
   return (
@@ -322,22 +395,84 @@ export function ProfilePage() {
 
             <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
               {BILLING_OPTIONS.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  disabled={billingLoading}
-                  onClick={() => void openBillingCheckout(option.id)}
-                  className="h-11 rounded-xl border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-100 disabled:opacity-60"
-                >
-                  {billingLoading
-                    ? 'Abrindo checkout...'
-                    : `${option.label} (${option.amountLabel})`}
-                </button>
+                <div key={option.id} className="rounded-xl border border-gray-200 bg-white p-3">
+                  <p className="text-sm font-semibold text-gray-900">
+                    {option.label} ({option.amountLabel})
+                  </p>
+                  <div className="mt-2 grid grid-cols-1 gap-2">
+                    <button
+                      type="button"
+                      disabled={billingLoading}
+                      onClick={() => void openPixCheckout(option.id)}
+                      className="h-10 rounded-lg border border-emerald-300 bg-emerald-50 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                    >
+                      {billingLoading ? 'Gerando PIX...' : 'PIX direto (sem login MP)'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={billingLoading}
+                      onClick={() => void openBillingCheckout(option.id)}
+                      className="h-10 rounded-lg border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-100 disabled:opacity-60"
+                    >
+                      {billingLoading ? 'Abrindo checkout...' : 'Checkout MP / Cartao'}
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
           </div>
         </div>
       </div>
+      {pixCheckout && (
+        <div className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-5">
+            <h4 className="text-lg font-semibold text-gray-900">PIX gerado</h4>
+            <p className="mt-1 text-sm text-gray-600">
+              Plano: {pixCheckout.planId} | Valor:{' '}
+              {(pixCheckout.amountCents / 100).toLocaleString('pt-BR', {
+                style: 'currency',
+                currency: 'BRL',
+              })}
+            </p>
+            <img
+              src={`data:image/png;base64,${pixCheckout.qrCodeBase64}`}
+              alt="QR Code PIX"
+              className="mx-auto mt-4 h-52 w-52 rounded-lg border border-gray-200"
+            />
+            <textarea
+              value={pixCheckout.qrCode}
+              readOnly
+              className="mt-4 h-24 w-full rounded-lg border border-gray-300 p-2 text-xs"
+            />
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => void copyPixCode()}
+                className="h-10 rounded-lg bg-emerald-600 text-sm font-semibold text-white hover:bg-emerald-500"
+              >
+                Copiar codigo PIX
+              </button>
+              <button
+                type="button"
+                onClick={() => setPixCheckout(null)}
+                className="h-10 rounded-lg border border-gray-300 bg-white text-sm font-semibold hover:bg-gray-100"
+              >
+                Fechar
+              </button>
+            </div>
+            {pixCheckout.ticketUrl && (
+              <a
+                href={pixCheckout.ticketUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 inline-flex text-sm font-semibold text-blue-700 underline"
+              >
+                Abrir comprovante no Mercado Pago
+              </a>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

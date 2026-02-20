@@ -392,3 +392,6 @@ verify_jwt = false
 
 [functions.billing-create-checkout]
 verify_jwt = false
+
+[functions.billing-create-pix]
+verify_jwt = false

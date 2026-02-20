@@ -294,28 +294,31 @@ export function DashboardLayout() {
       >
         <div className="h-full flex flex-col">
           <div className="h-16 flex items-center px-6 border-b border-gray-100">
-            <span
+            <Link
+              to="/dashboard/perfil"
+              onClick={closeMobileSidebar}
               className={`
-                text-2xl font-bold font-playfair text-gold-500 whitespace-nowrap
-                transition-all duration-200
-                ${isSidebarCollapsed ? 'md:opacity-0 md:w-0 md:overflow-hidden' : 'md:opacity-100'}
+                flex items-center min-w-0 rounded-xl transition-all duration-200
+                hover:bg-gray-50
+                ${isSidebarCollapsed ? 'md:justify-center md:w-full md:px-0' : 'md:px-2 md:py-1.5'}
               `}
+              title="Meu Perfil"
             >
-              Planejar<span className="text-gray-900">Pro</span>
-            </span>
-
-            <span
-              className={`
-                hidden md:flex items-center justify-center
-                text-xl font-bold font-playfair text-gold-500
-                transition-all duration-200
-                ${isSidebarCollapsed ? 'md:opacity-100' : 'md:opacity-0 md:w-0 md:overflow-hidden'}
-              `}
-              aria-label="PlanejarPro"
-              title="PlanejarPro"
-            >
-              PP
-            </span>
+              <div className="w-9 h-9 rounded-full bg-gold-500 text-white flex items-center justify-center font-bold shadow-sm shrink-0">
+                {(user?.email?.charAt(0) || 'U').toUpperCase()}
+              </div>
+              <div
+                className={`
+                  ml-3 min-w-0 transition-all duration-200
+                  ${isSidebarCollapsed ? 'md:opacity-0 md:max-w-0 md:overflow-hidden' : 'md:opacity-100'}
+                `}
+              >
+                <p className="text-sm font-semibold text-gray-900 truncate">
+                  {user?.email?.split('@')[0] || 'Usuário'}
+                </p>
+                <p className="text-xs text-gray-500 truncate">Gerenciar perfil</p>
+              </div>
+            </Link>
 
             <button
               onClick={closeMobileSidebar}
@@ -410,20 +413,10 @@ export function DashboardLayout() {
               </div>
             </div>
 
-            <div className={`grid grid-cols-2 gap-2 ${isSidebarCollapsed ? 'md:hidden' : 'md:grid'}`}>
-              <Link
-                to="/dashboard/perfil"
-                onClick={closeMobileSidebar}
-                className="flex items-center justify-center px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-gold-600 transition-colors shadow-sm"
-                title="Meu Perfil"
-              >
-                <Settings size={16} className="mr-2" />
-                Perfil
-              </Link>
-
+            <div className={`${isSidebarCollapsed ? 'md:hidden' : 'md:block'}`}>
               <button
                 onClick={signOut}
-                className="flex items-center justify-center px-3 py-2 text-xs font-medium text-red-600 bg-white border border-gray-200 rounded-lg hover:bg-red-50 hover:border-red-100 transition-colors shadow-sm"
+                className="w-full flex items-center justify-center px-3 py-2 text-xs font-medium text-red-600 bg-white border border-gray-200 rounded-lg hover:bg-red-50 hover:border-red-100 transition-colors shadow-sm"
                 title="Sair do Sistema"
               >
                 <LogOut size={16} className="mr-2" />

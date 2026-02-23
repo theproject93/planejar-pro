@@ -9,11 +9,19 @@
 import { type Session, type User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
 
+export type SignupPlanId = 'essencial' | 'profissional' | 'elite';
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, name?: string) => Promise<void>;
+  signUp: (
+    email: string,
+    password: string,
+    name?: string,
+    planId?: SignupPlanId,
+    trialDays?: number
+  ) => Promise<void>;
   signInWithProvider: (provider: 'google' | 'azure') => Promise<void>;
   signOut: () => Promise<void>;
   isAuthenticated: boolean;
@@ -104,7 +112,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   };
 
-  const signUp = async (email: string, password: string, name?: string) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    name?: string,
+    planId: SignupPlanId = 'essencial',
+    trialDays = planId === 'essencial' ? 30 : 0
+  ) => {
+    const safeTrialDays =
+      Number.isFinite(trialDays) && trialDays > 0 ? Math.floor(trialDays) : 0;
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -112,8 +129,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         emailRedirectTo: `${window.location.origin}/dashboard`,
         data: {
           name: (name ?? '').trim(),
-          plan_interest: 'trial_30d',
-          trial_days: 30,
+          plan_interest: planId,
+          trial_days: safeTrialDays,
         },
       },
     });

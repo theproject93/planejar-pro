@@ -156,7 +156,7 @@ export function LandingPage() {
             transition={{ duration: 0.8, ease: 'easeOut' }}
           >
             <span className="bg-white/10 backdrop-blur-md text-gold-300 text-xs font-bold px-4 py-1.5 rounded-full mb-8 inline-block border border-gold-500/30 uppercase tracking-widest shadow-lg hover:bg-white/20 transition-colors cursor-default">
-              TESTE GRÁTIS POR 30 DIAS
+              30 DIAS GRÁTIS NO PLANO ESSENCIAL
             </span>
           </motion.div>
 
@@ -189,7 +189,7 @@ export function LandingPage() {
             transition={{ duration: 0.8, delay: 0.6, ease: 'easeOut' }}
             className="flex flex-col space-y-4 sm:flex-row sm:justify-center sm:space-y-0 sm:space-x-6"
           >
-            <Link to="/cadastro">
+            <Link to="/cadastro?plano=essencial">
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
@@ -325,7 +325,7 @@ export function LandingPage() {
 
           <ScrollReveal delay={0.5}>
             <div className="mt-10 text-center">
-            <Link to="/cadastro">
+            <Link to="/cadastro?plano=essencial">
                 <button
                   type="button"
                   className="inline-flex items-center justify-center rounded-xl bg-black px-8 py-3 text-sm font-semibold text-white hover:bg-gray-800 transition-colors"
@@ -457,7 +457,7 @@ export function LandingPage() {
                 Invista no sistema que acompanha o seu nível de entrega
               </h2>
               <p className="text-sm text-gray-300">
-                Todos os planos começam com 30 dias grátis e acesso completo.
+                Somente o plano Essencial inclui 30 dias grátis. Profissional e Elite não possuem período de teste.
               </p>
             </div>
           </ScrollReveal>
@@ -475,7 +475,7 @@ export function LandingPage() {
                   <li>Checklist e cronograma com execução mais rápida</li>
                   <li>Controle financeiro essencial por evento</li>
                 </ul>
-                <Link to="/cadastro" className="inline-block w-full">
+                <Link to="/cadastro?plano=essencial" className="inline-block w-full">
                   <button className="w-full rounded-lg border border-white/30 py-2.5 hover:bg-white/10 transition-colors">
                     Testar 30 dias grátis
                   </button>
@@ -498,9 +498,9 @@ export function LandingPage() {
                   <li>Gestão de equipe e fornecedores sem caos</li>
                   <li>Mais controle para quem já está crescendo</li>
                 </ul>
-                <Link to="/cadastro" className="inline-block w-full">
+                <Link to="/cadastro?plano=profissional" className="inline-block w-full">
                   <button className="w-full rounded-lg bg-gold-400 py-2.5 font-semibold text-black hover:bg-gold-300 transition-colors">
-                    Testar 30 dias grátis
+                    Assinar sem teste
                   </button>
                 </Link>
               </div>
@@ -518,9 +518,9 @@ export function LandingPage() {
                   <li>Gestão premium para padrão elevado de entrega</li>
                   <li>Prioridade no suporte e evolução contínua</li>
                 </ul>
-                <Link to="/cadastro" className="inline-block w-full">
+                <Link to="/cadastro?plano=elite" className="inline-block w-full">
                   <button className="w-full rounded-lg border border-white/30 py-2.5 hover:bg-white/10 transition-colors">
-                    Começar no teste grátis
+                    Assinar sem teste
                   </button>
                 </Link>
               </div>

@@ -1,7 +1,7 @@
-﻿import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Check, Loader2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useAuth, type SignupPlanId } from '../contexts/AuthContext';
 
 const PLAN_OPTIONS = [
   {
@@ -27,9 +27,20 @@ const PLAN_OPTIONS = [
   },
 ] as const;
 
+const OAUTH_SIGNUP_INTENT_KEY = 'planejarpro.oauth_signup_intent';
+
+function normalizePlan(value: string | null): SignupPlanId {
+  if (value === 'essencial' || value === 'profissional' || value === 'elite') {
+    return value;
+  }
+  return 'essencial';
+}
+
 export function SignupPage() {
+  const [searchParams] = useSearchParams();
   const { signUp, signInWithProvider } = useAuth();
-  const [selectedPlan, setSelectedPlan] = useState<string>('profissional');
+  const requestedPlan = normalizePlan(searchParams.get('plano'));
+  const [selectedPlan, setSelectedPlan] = useState<SignupPlanId>(requestedPlan);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,10 +50,16 @@ export function SignupPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const selectedPlanLabel = useMemo(
-    () => PLAN_OPTIONS.find((p) => p.id === selectedPlan)?.name ?? 'Profissional',
+  useEffect(() => {
+    setSelectedPlan(requestedPlan);
+  }, [requestedPlan]);
+
+  const selectedPlanData = useMemo(
+    () => PLAN_OPTIONS.find((p) => p.id === selectedPlan) ?? PLAN_OPTIONS[0],
     [selectedPlan]
   );
+  const selectedPlanLabel = selectedPlanData.name;
+  const hasTrial = selectedPlan === 'essencial';
 
   async function handleSignUp(event: React.FormEvent) {
     event.preventDefault();
@@ -61,10 +78,17 @@ export function SignupPage() {
 
     setLoading(true);
     try {
-      await signUp(email, password, name || undefined);
-      setSuccess(
-        `Conta criada com sucesso no plano ${selectedPlanLabel}. Você já está no teste grátis de 30 dias com acesso completo.`
-      );
+      await signUp(email, password, name || undefined, selectedPlan, hasTrial ? 30 : 0);
+
+      if (hasTrial) {
+        setSuccess(
+          `Conta criada com sucesso no plano ${selectedPlanLabel}. Seu teste grátis de 30 dias já está ativo.`
+        );
+      } else {
+        setSuccess(
+          `Conta criada com sucesso no plano ${selectedPlanLabel}. Esse plano não possui teste grátis.`
+        );
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Não foi possível criar sua conta agora.';
       setError(message);
@@ -78,8 +102,19 @@ export function SignupPage() {
     setSuccess('');
     setOauthLoading(provider);
     try {
+      const intentPayload = {
+        source: 'signup' as const,
+        createdAt: Date.now(),
+        planId: selectedPlan,
+        trialDays: hasTrial ? 30 : 0,
+      };
+      window.localStorage.setItem(
+        OAUTH_SIGNUP_INTENT_KEY,
+        JSON.stringify(intentPayload)
+      );
       await signInWithProvider(provider);
     } catch (err: unknown) {
+      window.localStorage.removeItem(OAUTH_SIGNUP_INTENT_KEY);
       const message = err instanceof Error ? err.message : 'Falha ao conectar com provedor.';
       setError(message);
       setOauthLoading(null);
@@ -96,16 +131,25 @@ export function SignupPage() {
 
         <div className="rounded-3xl bg-white border border-gray-100 shadow-xl overflow-hidden">
           <div className="p-8 md:p-10 border-b border-gray-100 bg-gradient-to-r from-black to-gray-900 text-white">
-            <p className="text-gold-300 text-xs font-semibold uppercase tracking-widest">Teste Grátis</p>
-            <h1 className="mt-2 text-3xl font-playfair font-bold">Acesso completo por 30 dias</h1>
+            <p className="text-gold-300 text-xs font-semibold uppercase tracking-widest">
+              {hasTrial ? 'Teste Grátis' : 'Assinatura Direta'}
+            </p>
+            <h1 className="mt-2 text-3xl font-playfair font-bold">
+              {hasTrial
+                ? 'Plano Essencial com 30 dias grátis'
+                : `Plano ${selectedPlanLabel} sem período grátis`}
+            </h1>
             <p className="mt-2 text-sm text-gray-200">
-              Escolha o plano agora, mas use tudo sem limite durante 30 dias. Cancele quando quiser.
+              {hasTrial
+                ? 'Somente o plano Essencial inclui teste de 30 dias. Profissional e Elite iniciam sem teste grátis.'
+                : `Você escolheu o plano ${selectedPlanLabel}. Profissional e Elite iniciam sem teste grátis.`}
             </p>
           </div>
 
           <div className="grid lg:grid-cols-2 gap-0">
             <div className="p-8 md:p-10 border-r border-gray-100">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Planos da plataforma</h2>
+              <p className="text-xs text-gray-500 mb-4">Apenas o Essencial possui teste de 30 dias.</p>
               <div className="grid gap-3">
                 {PLAN_OPTIONS.map((plan) => {
                   const selected = plan.id === selectedPlan;
@@ -124,7 +168,9 @@ export function SignupPage() {
                         <div>
                           <p className="text-sm font-semibold text-gray-900">{plan.name}</p>
                           <p className="text-xl font-bold text-gray-900 mt-1">{plan.price}</p>
-                          <p className="text-xs text-gray-500 mt-1">após os 30 dias grátis</p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {plan.id === 'essencial' ? 'inclui 30 dias grátis' : 'sem teste grátis'}
+                          </p>
                         </div>
                         {plan.featured && (
                           <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-gold-400 text-black">
@@ -249,13 +295,19 @@ export function SignupPage() {
                   disabled={loading || oauthLoading !== null}
                   className="w-full h-11 rounded-xl bg-black text-white font-semibold hover:bg-gray-800 disabled:opacity-60 inline-flex items-center justify-center"
                 >
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Criar conta e iniciar teste de 30 dias'}
+                  {loading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : hasTrial ? (
+                    'Criar conta e iniciar teste de 30 dias'
+                  ) : (
+                    `Criar conta sem teste (${selectedPlanLabel})`
+                  )}
                 </button>
               </form>
 
               <p className="text-xs text-gray-500 mt-4">
                 Plano selecionado: <span className="font-semibold text-gray-700">{selectedPlanLabel}</span>.
-                O acesso permanece completo durante os 30 dias grátis.
+                {hasTrial ? ' O teste grátis de 30 dias será aplicado.' : ' Esse plano não possui teste grátis.'}
               </p>
             </div>
           </div>

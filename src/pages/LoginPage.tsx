@@ -4,6 +4,8 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
+const OAUTH_SIGNUP_INTENT_KEY = 'planejarpro.oauth_signup_intent';
+
 export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,6 +38,7 @@ export function LoginPage() {
 
   async function handleOAuth(provider: 'google' | 'azure') {
     setError('');
+    window.localStorage.removeItem(OAUTH_SIGNUP_INTENT_KEY);
     setOauthLoading(provider);
     try {
       await signInWithProvider(provider);
@@ -172,10 +175,10 @@ export function LoginPage() {
         <div className="mt-6 pt-6 border-t border-gray-100 text-center">
           <p className="text-sm text-gray-600 mb-3">Ainda não tem conta?</p>
           <Link
-            to="/cadastro"
+            to="/cadastro?plano=essencial"
             className="inline-flex items-center justify-center w-full h-11 rounded-xl border border-black text-black font-semibold hover:bg-black hover:text-white transition-colors"
           >
-            Criar conta (30 dias grátis)
+            Criar conta (30 dias no Essencial)
           </Link>
         </div>
       </motion.div>

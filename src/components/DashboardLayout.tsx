@@ -163,7 +163,7 @@ export function DashboardLayout() {
     const trialDays =
       typeof rawTrialDays === 'number' && Number.isFinite(rawTrialDays) && rawTrialDays > 0
         ? Math.floor(rawTrialDays)
-        : 30;
+        : 0;
     if (trialDays <= 0) return null;
 
     const createdAt = new Date(user.created_at);
